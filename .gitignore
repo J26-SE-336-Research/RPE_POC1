@@ -80,7 +80,7 @@ ehthumbs_vista.db
 
 .env
 .env.*
-!.env.example
+.env.example
 
 # Spring local configuration
 application-local.properties
