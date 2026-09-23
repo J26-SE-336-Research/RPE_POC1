@@ -1,0 +1,117 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: rrpe-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - rrpe_pgdata:/var/lib/postgresql/data
+      - ./postgres-init/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql
+    networks:
+      - rrpe-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  inventory-service:
+    build:
+      context: ./inventory-service
+    container_name: inventory-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${INVENTORY_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SERVER_PORT: 8082
+    ports:
+      - "${INVENTORY_SERVICE_PORT}:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rrpe-net
+
+  payment-service:
+    build:
+      context: ./payment-service
+    container_name: payment-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${PAYMENT_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SERVER_PORT: 8083
+      PAYMENT_SIMULATED_FAILURE_RATE: ${PAYMENT_SIMULATED_FAILURE_RATE}
+    ports:
+      - "${PAYMENT_SERVICE_PORT}:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rrpe-net
+
+  notification-service:
+    build:
+      context: ./notification-service
+    container_name: notification-service
+    environment:
+      SERVER_PORT: 8084
+    ports:
+      - "${NOTIFICATION_SERVICE_PORT}:8084"
+    networks:
+      - rrpe-net
+
+  order-service:
+    build:
+      context: ./order-service
+    container_name: order-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${ORDER_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SERVER_PORT: 8081
+      INVENTORY_SERVICE_URL: http://inventory-service:8082
+      PAYMENT_SERVICE_URL: http://payment-service:8083
+      NOTIFICATION_SERVICE_URL: http://notification-service:8084
+    ports:
+      - "${ORDER_SERVICE_PORT}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      inventory-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+    networks:
+      - rrpe-net
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+    container_name: api-gateway
+    environment:
+      SERVER_PORT: 8080
+      ORDER_SERVICE_URL: http://order-service:8081
+      INVENTORY_SERVICE_URL: http://inventory-service:8082
+      PAYMENT_SERVICE_URL: http://payment-service:8083
+      NOTIFICATION_SERVICE_URL: http://notification-service:8084
+    ports:
+      - "${API_GATEWAY_PORT}:8080"
+    depends_on:
+      - order-service
+      - inventory-service
+      - payment-service
+      - notification-service
+    networks:
+      - rrpe-net
+
+volumes:
+  rrpe_pgdata:
+
+networks:
+  rrpe-net:

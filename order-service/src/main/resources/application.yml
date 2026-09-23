@@ -1,0 +1,35 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: order-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/orderdb}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+# Base URLs for the services order-service calls directly. Plain
+# HTTP calls to fixed addresses on purpose: no service discovery, no
+# client-side load balancing — this is deliberately the simplest
+# thing that works, since it's a clean surface for a network-layer
+# interceptor to sit in front of later.
+clients:
+  inventory-service:
+    base-url: ${INVENTORY_SERVICE_URL:http://localhost:8082}
+  payment-service:
+    base-url: ${PAYMENT_SERVICE_URL:http://localhost:8083}
+  notification-service:
+    base-url: ${NOTIFICATION_SERVICE_URL:http://localhost:8084}
