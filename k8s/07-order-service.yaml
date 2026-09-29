@@ -37,7 +37,7 @@ spec:
             - name: SERVER_PORT
               value: "8081"
             - name: SPRING_DATASOURCE_URL
-              value: jdbc:postgresql://postgres:5432/$(ORDER_DB)
+              value: jdbc:postgresql://postgres:5432/orderdb
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -73,18 +73,30 @@ spec:
                 configMapKeyRef:
                   name: rrpe-config
                   key: NOTIFICATION_SERVICE_URL
-          readinessProbe:
+          startupProbe:
             httpGet:
               path: /actuator/health
               port: 8081
-            initialDelaySeconds: 15
+            failureThreshold: 30
             periodSeconds: 5
+
           livenessProbe:
             httpGet:
               path: /actuator/health
               port: 8081
-            initialDelaySeconds: 30
+            initialDelaySeconds: 10
+            timeoutSeconds: 2
             periodSeconds: 15
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 10
+            timeoutSeconds: 2
+            periodSeconds: 5
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service
