@@ -1,0 +1,21 @@
+services:
+  backend:
+    image: python:3.12-alpine
+    working_dir: /srv
+    command: ["python", "-m", "http.server", "9000", "--bind", "0.0.0.0"]
+    expose:
+      - "9000"
+
+  proxy:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    environment:
+      PROXY_LISTEN_HOST: 0.0.0.0
+      PROXY_LISTEN_PORT: 8080
+      BACKEND_HOST: backend
+      BACKEND_PORT: 9000
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend

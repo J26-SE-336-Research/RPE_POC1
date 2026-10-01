@@ -20,6 +20,11 @@ public class RestTemplateConfig {
         return builder
                 .setConnectTimeout(Duration.ofSeconds(3))
                 .setReadTimeout(Duration.ofSeconds(5))
+                .additionalInterceptors((request, body, execution) -> {
+                    String requestId = RequestPropagationContext.currentRequestId();
+                    if (requestId != null) request.getHeaders().set("Request_id", requestId);
+                    return execution.execute(request, body);
+                })
                 .build();
     }
 }
