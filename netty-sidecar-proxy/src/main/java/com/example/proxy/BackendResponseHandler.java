@@ -7,9 +7,11 @@ import io.netty.channel.Channel;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaders;
+import java.util.logging.Logger;
 
 public final class BackendResponseHandler
         extends SimpleChannelInboundHandler<FullHttpResponse> {
+    private static final Logger LOGGER = Logger.getLogger(BackendResponseHandler.class.getName());
 
     private final Channel clientChannel;
     private final String requestId;
@@ -39,7 +41,12 @@ public final class BackendResponseHandler
         forwarded.headers().set("X-Proxy-Processed", "true");
         boolean downstreamExpired = Boolean.parseBoolean(response.headers().get("deadlineExceded"));
         boolean downstreamCancellation = Boolean.parseBoolean(response.headers().get("cancellation_Triggered"));
-        if (downstreamExpired || downstreamCancellation) ProxyHandler.markCancellation(requestId);
+        if (downstreamExpired || downstreamCancellation) {
+            ProxyHandler.markCancellation(requestId);
+            LOGGER.info(() -> "Received cancellation status from downstream for Request_id=" + requestId
+                    + " (deadlineExceded=" + downstreamExpired
+                    + ", cancellation_Triggered=" + downstreamCancellation + ")");
+        }
         io.netty.handler.codec.http.HttpHeaders chainContext = ProxyHandler.requestContext(requestId);
         boolean expired = downstreamExpired
                 || (ownsContext && detectInboundDeadline && deadline <= System.currentTimeMillis())
@@ -50,6 +57,9 @@ public final class BackendResponseHandler
         forwarded.headers().set("deadlinevalue", Long.toString(deadline));
         forwarded.headers().set("deadlineExceded", Boolean.toString(expired));
         forwarded.headers().set("cancellation_Triggered", Boolean.toString(cancellation));
+        if (cancellation) {
+            LOGGER.info(() -> "Forwarding cancellation status upstream for Request_id=" + requestId);
+        }
         forwarded.headers().remove(HttpHeaderNames.TRANSFER_ENCODING);
         forwarded.headers().setInt(
                 HttpHeaderNames.CONTENT_LENGTH,

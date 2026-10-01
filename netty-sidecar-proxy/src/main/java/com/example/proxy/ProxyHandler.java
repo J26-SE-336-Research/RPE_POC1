@@ -12,8 +12,10 @@ import java.util.UUID;
 import java.net.InetSocketAddress;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Logger;
 
 public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
+    private static final Logger LOGGER = Logger.getLogger(ProxyHandler.class.getName());
     private static final String DEADLINE = "deadlinevalue";
     private static final String EXCEEDED = "deadlineExceded";
     private static final String CANCELLATION = "cancellation_Triggered";
@@ -32,9 +34,14 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
 
     private static void markDeadlineExceeded(String requestId) {
         REQUEST_CONTEXTS.computeIfPresent(requestId, (id, existing) -> {
+            boolean alreadyExceeded = Boolean.parseBoolean(existing.get(EXCEEDED));
             HttpHeaders updated = existing.copy();
             updated.set(EXCEEDED, "true");
             updated.set(CANCELLATION, "true");
+            if (!alreadyExceeded) {
+                LOGGER.info(() -> "Deadline exceeded for Request_id=" + requestId
+                        + "; cancellation_Triggered=true");
+            }
             return updated;
         });
     }
@@ -94,6 +101,10 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                 ? Boolean.parseBoolean(storedContext.get(CANCELLATION))
                 : Boolean.parseBoolean(request.headers().get(CANCELLATION)));
         contextHeaders.set(CANCELLATION, Boolean.toString(cancellation));
+        if (expired) {
+            LOGGER.info("Inbound deadline already exceeded for Request_id=" + requestId
+                    + "; forwarding with cancellation_Triggered=true");
+        }
         if (ownsContext) REQUEST_CONTEXTS.put(requestId, contextHeaders.copy());
         final String activeRequestId = requestId;
         final long activeDeadline = deadline;
@@ -146,12 +157,21 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                     }
 
                     Channel backendChannel = future.channel();
+                    HttpHeaders latestContext = requestContext(activeRequestId);
+                    if (latestContext != null) {
+                        latestContext.forEach(entry -> forwarded.headers().set(entry.getKey(), entry.getValue()));
+                    }
+                    boolean activeCancellation = latestContext != null
+                            && Boolean.parseBoolean(latestContext.get(CANCELLATION));
                     backendChannel.writeAndFlush(forwarded).addListener(writeFuture -> {
                         if (!writeFuture.isSuccess()) {
                             if (ownsContext) forgetRequest(activeRequestId);
                             backendChannel.close();
                             sendError(clientCtx, HttpResponseStatus.BAD_GATEWAY,
                                     "Could not send request to backend");
+                        } else if (activeCancellation) {
+                            LOGGER.info(() -> "Forwarded cancellation_Triggered=true to "
+                                    + destination + " for Request_id=" + activeRequestId);
                         }
                     });
                 });
