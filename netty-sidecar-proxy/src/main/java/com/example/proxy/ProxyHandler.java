@@ -6,10 +6,10 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.Channel;
 import io.netty.handler.codec.http.*;
 import java.util.UUID;
+import java.net.InetSocketAddress;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -55,6 +55,13 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
     @Override
     protected void channelRead0(ChannelHandlerContext clientCtx, FullHttpRequest request) {
         String uri = request.uri();
+        if (!(clientCtx.channel().localAddress() instanceof InetSocketAddress destination)
+                || destination.isUnresolved()) {
+            request.release();
+            sendError(clientCtx, HttpResponseStatus.BAD_GATEWAY,
+                    "Could not determine original TPROXY destination");
+            return;
+        }
 
         String requestId = request.headers().get(REQUEST_ID);
         boolean suppliedRequestId = requestId != null && !requestId.isBlank();
@@ -129,7 +136,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                         config.detectInboundDeadline(), ownsContext))
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
 
-        backendBootstrap.connect(config.backendHost(), config.backendPort())
+        backendBootstrap.connect(destination)
                 .addListener((ChannelFutureListener) future -> {
                     if (!future.isSuccess()) {
                         if (ownsContext) forgetRequest(activeRequestId);

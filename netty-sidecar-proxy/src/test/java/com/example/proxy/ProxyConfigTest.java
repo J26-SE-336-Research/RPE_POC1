@@ -7,11 +7,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class ProxyConfigTest {
     @Test
     void recordStoresConfiguration() {
-        ProxyConfig config = new ProxyConfig("0.0.0.0", 8080, "localhost", 9000);
+        ProxyConfig config = new ProxyConfig("0.0.0.0", 8080, 5000, true);
 
         assertEquals("0.0.0.0", config.listenHost());
         assertEquals(8080, config.listenPort());
-        assertEquals("localhost", config.backendHost());
-        assertEquals(9000, config.backendPort());
+        assertEquals(5000, config.defaultDeadlineMillis());
+        assertTrue(config.detectInboundDeadline());
     }
 }

@@ -10,7 +10,7 @@ Client / Service A
        | HTTP request
        v
 +-------------------------+
-|  Netty Sidecar Proxy    |
+|  Netty TPROXY Sidecar   |
 |       :8080             |
 |                         |
 |  HttpServerCodec        |
@@ -19,7 +19,7 @@ Client / Service A
 +------------+------------+
              |
              | HTTP request
-             | + X-My-Proxy header
+             | original destination + propagation headers
              v
 +-------------------------+
 |       Service B         |
@@ -35,7 +35,7 @@ Client / Service A
            Client
 ```
 
-The application can continue to think it is communicating with Service B. In a Kubernetes/Linux sidecar deployment, traffic can later be redirected to the proxy with iptables/TPROXY while the application itself remains configured for Service B.
+The application continues to call Service B using its normal destination. In Kubernetes/Linux, TPROXY can redirect that traffic to the sidecar, which reads the original destination and forwards the request there.
 
 ## Current implementation
 
@@ -44,11 +44,12 @@ The application can continue to think it is communicating with Service B. In a K
 - Netty 4.1.115.Final
 - HTTP/1.1
 - Listens on `0.0.0.0:8080`
-- Default backend: `localhost:9000`
+- Reads the original destination from each intercepted TPROXY TCP connection
+- Requires Linux Netty epoll and `IP_TRANSPARENT`
 - Adds `X-My-Proxy: Netty-Sidecar-Proxy`
 - Adds `X-Proxy-Processed: true` to backend responses
 - Configurable through environment variables
-- 5-second backend connection timeout
+- 5-second destination connection timeout
 - 10 MB aggregated HTTP message limit
 
 ## Important learning point: TCP streams
@@ -78,71 +79,31 @@ HTTP decoder sees:
 
 The HTTP decoder (`HttpServerCodec`) is therefore working on an ordered stream of bytes, not on individual TCP packets.
 
-## Run locally
-
-### 1. Start a backend service
-
-For a quick test:
-
-```bash
-python -m http.server 9000
-```
-
-Run that from a directory containing a file such as `index.html`.
-
-### 2. Build the proxy
+## Build and run
 
 ```bash
 mvn clean package
 ```
 
-### 3. Run the proxy
+Run on Linux with Netty native epoll available and the required transparent socket permission:
 
 ```bash
 java -jar target/netty-sidecar-proxy-1.0.0.jar
-```
-
-Default configuration:
-
-```text
-Proxy:   http://localhost:8080
-Backend: http://localhost:9000
-```
-
-### 4. Send a request
-
-```bash
-curl -v http://localhost:8080/
-```
-
-The request goes:
-
-```text
-curl -> proxy:8080 -> backend:9000 -> proxy -> curl
 ```
 
 ## Configuration
 
-Windows CMD:
-
-```cmd
-set PROXY_LISTEN_HOST=0.0.0.0
-set PROXY_LISTEN_PORT=8080
-set BACKEND_HOST=localhost
-set BACKEND_PORT=9000
-java -jar target\netty-sidecar-proxy-1.0.0.jar
-```
-
-Linux/macOS:
+Linux:
 
 ```bash
 export PROXY_LISTEN_HOST=0.0.0.0
 export PROXY_LISTEN_PORT=8080
-export BACKEND_HOST=localhost
-export BACKEND_PORT=9000
-
+export DEFAULT_DEADLINE_MILLIS=5000
+export PROXY_DETECT_INBOUND_DEADLINE=true
 java -jar target/netty-sidecar-proxy-1.0.0.jar
 ```
+
+The proxy always uses TPROXY mode: it enables Netty's Linux epoll transparent socket option and connects each intercepted request to that TCP connection's original destination. It has no fixed-backend mode. TPROXY rules, policy routing, and pod capabilities are deployment responsibilities and are not configured here. The shaded build includes Netty native epoll runtimes for Linux x86_64 and ARM64.
 
 ## Project structure
 
@@ -168,7 +129,7 @@ netty-sidecar-proxy/
 
 ## Deadline and cancellation propagation (proof of concept)
 
-The Netty sidecar beside the API gateway creates one chain identity and absolute Unix epoch deadline for a new outbound request when those headers are absent. It preserves existing values when a request already belongs to a chain, sends the headers to the backend, and echoes the chain metadata on its response:
+The Netty sidecar beside the API gateway creates one chain identity and absolute Unix epoch deadline for a new outbound request when those headers are absent. It preserves existing values when a request already belongs to a chain, sends the headers to the original destination, and echoes the chain metadata on its response:
 
 | Header | Meaning |
 | --- | --- |
@@ -181,7 +142,7 @@ Configure `DEFAULT_DEADLINE_MILLIS` on the gateway sidecar (default `5000`). The
 
 The order service captures only `Request_id` for the lifetime of its synchronous inbound request and adds only that header to inventory, payment, and notification calls. Its sidecar looks up the saved inbound context by ID and fills in `deadlinevalue`, `deadlineExceded`, and `cancellation_Triggered`. A new chain with no ID gets its UUID and deadline from the gateway sidecar. The sidecar retains the inbound chain context until the owning inbound request completes; completing an outbound hop does not evict it. When the deadline arrives, the sidecar updates the stored flags so later outbound hops carry the cancellation signal.
 
-This repository's proxy still has one configured backend per process and is not yet installed into `docker-compose.yml` as a transparent sidecar. Every service hop must be routed through a correctly configured proxy instance for proxy-side behavior to run. The proxy observes an elapsed deadline when handling a request and reflects the resulting flags in the response; it does not interrupt backend application work or send a separate asynchronous cancellation message to an already-running downstream request. Cancellation here is a propagated signal for application code to observe, consistent with this prototype's scope.
+Every service hop still needs to be routed through a proxy instance for proxy-side behavior to run. The proxy observes deadline expiry and propagates the resulting flags; it does not interrupt backend application work or send a separate asynchronous cancellation message to an already-running downstream request. Cancellation here is a propagated signal for application code to observe, consistent with this prototype's scope.
 
 ## What this version does not yet implement
 
