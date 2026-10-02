@@ -130,6 +130,8 @@ netty-sidecar-proxy/
 
 ## Deadline and cancellation propagation (proof of concept)
 
+For the simple-English end-to-end flow, example TPROXY rule shape, pod permission notes, and rollout checklist, see [DEADLINE_TPROXY_GUIDE.md](DEADLINE_TPROXY_GUIDE.md).
+
 The Netty sidecar beside the API gateway creates one chain identity and absolute Unix epoch deadline for a new outbound request when those headers are absent. It preserves existing values when a request already belongs to a chain, sends the headers to the original destination, and echoes the chain metadata on its response:
 
 | Header | Meaning |
