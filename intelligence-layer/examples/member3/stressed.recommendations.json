@@ -1,0 +1,36 @@
+﻿{
+    "schemaVersion":  "1.0",
+    "mode":  "ADVISORY",
+    "serviceName":  "order-service",
+    "status":  "STRESSED",
+    "sourceCollectedAt":  "2026-10-02T03:45:00Z",
+    "generatedAt":  "2026-10-02T04:10:23.498867900Z",
+    "expiresAt":  "2026-10-02T04:11:23.498867900Z",
+    "evidence":  [
+                     "Recent latency is 1.60 times the baseline",
+                     "Recent error rate is 6.00%"
+                 ],
+    "recommendations":  [
+                            {
+                                "action":  "RATE_LIMIT",
+                                "parameters":  {
+                                                   "maxRequestsPerSecond":  90.0
+                                               },
+                                "reason":  "Reduce admitted load while latency or errors are elevated"
+                            },
+                            {
+                                "action":  "CONCURRENCY_LIMIT",
+                                "parameters":  {
+                                                   "maxConcurrentRequests":  20
+                                               },
+                                "reason":  "In-flight requests exceed the baseline"
+                            },
+                            {
+                                "action":  "DISABLE_RETRIES",
+                                "parameters":  {
+                                                   "maxAttempts":  1
+                                               },
+                                "reason":  "Retries have increased during degradation; avoid adding retry traffic"
+                            }
+                        ]
+}
