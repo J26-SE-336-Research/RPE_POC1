@@ -8,5 +8,6 @@ services:
       PROXY_LISTEN_PORT: 8080
       DEFAULT_DEADLINE_MILLIS: 5000
       PROXY_DETECT_INBOUND_DEADLINE: "true"
+      PROXY_ROLE: service
     ports:
       - "8080:8080"

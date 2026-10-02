@@ -42,7 +42,7 @@ public final class BackendResponseHandler
         boolean downstreamExpired = Boolean.parseBoolean(response.headers().get("deadlineExceded"));
         boolean downstreamCancellation = Boolean.parseBoolean(response.headers().get("cancellation_Triggered"));
         if (downstreamExpired || downstreamCancellation) {
-            ProxyHandler.markCancellation(requestId);
+            ProxyHandler.markResponseStatus(requestId, downstreamExpired, downstreamCancellation);
             LOGGER.info(() -> "Received cancellation status from downstream for Request_id=" + requestId
                     + " (deadlineExceded=" + downstreamExpired
                     + ", cancellation_Triggered=" + downstreamCancellation + ")");

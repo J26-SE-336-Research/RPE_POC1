@@ -46,17 +46,26 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         });
     }
 
-    static void markCancellation(String requestId) {
+    static void markResponseStatus(String requestId, boolean deadlineExceeded, boolean cancellationTriggered) {
         REQUEST_CONTEXTS.computeIfPresent(requestId, (id, existing) -> {
             HttpHeaders updated = existing.copy();
-            updated.set(EXCEEDED, "true");
-            updated.set(CANCELLATION, "true");
+            boolean alreadyExceeded = Boolean.parseBoolean(existing.get(EXCEEDED));
+            boolean alreadyCancelled = Boolean.parseBoolean(existing.get(CANCELLATION));
+            updated.set(EXCEEDED, Boolean.toString(alreadyExceeded || deadlineExceeded));
+            updated.set(CANCELLATION, Boolean.toString(alreadyCancelled || cancellationTriggered
+                    || deadlineExceeded));
             return updated;
         });
     }
 
     public ProxyHandler(ProxyConfig config) {
         this.config = config;
+    }
+
+    private static void rejectMissingContext(ChannelHandlerContext ctx, FullHttpRequest request, String missing) {
+        request.release();
+        sendError(ctx, HttpResponseStatus.BAD_REQUEST,
+                "Missing required propagation header or context: " + missing);
     }
 
     @Override
@@ -72,43 +81,71 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
 
         String requestId = request.headers().get(REQUEST_ID);
         boolean suppliedRequestId = requestId != null && !requestId.isBlank();
-        if (requestId == null || requestId.isBlank()) requestId = UUID.randomUUID().toString();
+        boolean gatewaySidecar = config.gatewaySidecar();
+        if (!suppliedRequestId && !gatewaySidecar) {
+            rejectMissingContext(clientCtx, request, REQUEST_ID);
+            return;
+        }
+        if (!suppliedRequestId) requestId = UUID.randomUUID().toString();
         HttpHeaders storedContext = REQUEST_CONTEXTS.get(requestId);
-        boolean hasChainMetadata = request.headers().contains(DEADLINE)
-                || request.headers().contains(EXCEEDED) || request.headers().contains(CANCELLATION);
-        // A request carrying a full context starts/continues the inbound side
-        // of this process. A request carrying only Request_id is an outbound
-        // hop: restore its metadata from the inbound request's stored context.
-        boolean ownsContext = !suppliedRequestId || hasChainMetadata || storedContext == null;
+        boolean detectThisRequestDeadline = config.detectInboundDeadline() && !gatewaySidecar;
+        boolean requestIdOnly = suppliedRequestId
+                && !request.headers().contains(DEADLINE)
+                && !request.headers().contains(EXCEEDED)
+                && !request.headers().contains(CANCELLATION);
+
+        // Outbound service calls carry only Request_id. Their sidecar must find
+        // the full chain context saved from that service's inbound request.
+        if (requestIdOnly && storedContext == null && !gatewaySidecar) {
+            rejectMissingContext(clientCtx, request, "stored context for " + REQUEST_ID);
+            return;
+        }
+
         String deadlineValue = request.headers().get(DEADLINE);
-        if (storedContext != null && !hasChainMetadata) deadlineValue = storedContext.get(DEADLINE);
+        if (requestIdOnly && storedContext != null) deadlineValue = storedContext.get(DEADLINE);
+        if ((deadlineValue == null || deadlineValue.isBlank()) && gatewaySidecar) {
+            deadlineValue = Long.toString(System.currentTimeMillis() + config.defaultDeadlineMillis());
+        }
+        if (deadlineValue == null || deadlineValue.isBlank()) {
+            rejectMissingContext(clientCtx, request, DEADLINE);
+            return;
+        }
         long deadline;
         try {
-            deadline = deadlineValue == null ? System.currentTimeMillis() + config.defaultDeadlineMillis()
-                    : Long.parseLong(deadlineValue);
-        } catch (NumberFormatException ignored) {
-            deadline = System.currentTimeMillis() + config.defaultDeadlineMillis();
+            deadline = Long.parseLong(deadlineValue);
+        } catch (NumberFormatException invalidDeadline) {
+            request.release();
+            sendError(clientCtx, HttpResponseStatus.BAD_REQUEST, "Invalid " + DEADLINE + " header");
+            return;
         }
-        boolean expired = storedContext != null && !hasChainMetadata
+
+        boolean expired = requestIdOnly && storedContext != null
                 ? Boolean.parseBoolean(storedContext.get(EXCEEDED))
-                : (config.detectInboundDeadline() && deadline <= System.currentTimeMillis())
+                : (detectThisRequestDeadline && deadline <= System.currentTimeMillis())
                     || Boolean.parseBoolean(request.headers().get(EXCEEDED));
+        if (!requestIdOnly && !gatewaySidecar
+                && (!request.headers().contains(EXCEEDED) || !request.headers().contains(CANCELLATION))) {
+            rejectMissingContext(clientCtx, request, "deadline and cancellation flags");
+            return;
+        }
         HttpHeaders contextHeaders = new DefaultHttpHeaders();
         contextHeaders.set(REQUEST_ID, requestId);
         contextHeaders.set(DEADLINE, Long.toString(deadline));
         contextHeaders.set(EXCEEDED, Boolean.toString(expired));
-        boolean cancellation = expired || (storedContext != null && !hasChainMetadata
+        boolean incomingCancellation = requestIdOnly && storedContext != null
                 ? Boolean.parseBoolean(storedContext.get(CANCELLATION))
-                : Boolean.parseBoolean(request.headers().get(CANCELLATION)));
+                : Boolean.parseBoolean(request.headers().get(CANCELLATION));
+        boolean cancellation = expired || incomingCancellation;
         contextHeaders.set(CANCELLATION, Boolean.toString(cancellation));
         if (expired) {
             LOGGER.info("Inbound deadline already exceeded for Request_id=" + requestId
                     + "; forwarding with cancellation_Triggered=true");
         }
+        boolean ownsContext = !(requestIdOnly && storedContext != null);
         if (ownsContext) REQUEST_CONTEXTS.put(requestId, contextHeaders.copy());
         final String activeRequestId = requestId;
         final long activeDeadline = deadline;
-        if (ownsContext && config.detectInboundDeadline()) {
+        if (ownsContext && detectThisRequestDeadline) {
             long delayMillis = Math.max(0, deadline - System.currentTimeMillis());
             clientCtx.executor().schedule(
                     () -> markDeadlineExceeded(activeRequestId), delayMillis, TimeUnit.MILLISECONDS);
@@ -144,7 +181,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         backendBootstrap.group(clientCtx.channel().eventLoop())
                 .channel(clientCtx.channel().getClass())
                 .handler(new BackendInitializer(clientCtx.channel(), activeRequestId, activeDeadline,
-                        config.detectInboundDeadline(), ownsContext))
+                        detectThisRequestDeadline, ownsContext))
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
 
         backendBootstrap.connect(destination)

@@ -100,6 +100,7 @@ export PROXY_LISTEN_HOST=0.0.0.0
 export PROXY_LISTEN_PORT=8080
 export DEFAULT_DEADLINE_MILLIS=5000
 export PROXY_DETECT_INBOUND_DEADLINE=true
+export PROXY_ROLE=service
 java -jar target/netty-sidecar-proxy-1.0.0.jar
 ```
 
@@ -139,6 +140,8 @@ The Netty sidecar beside the API gateway creates one chain identity and absolute
 | `Request_id` | UUID identifying the request chain |
 
 Configure `DEFAULT_DEADLINE_MILLIS` on the gateway sidecar (default `5000`). The proxy uses it only when a request reaches it without a deadline. `PROXY_DETECT_INBOUND_DEADLINE` controls deadline detection on a proxy instance (default `true`); set it to `false` on an instance that handles outbound hops so it forwards the inherited status without independently declaring an inbound deadline expired.
+
+Set `PROXY_ROLE=gateway` only on the API gateway sidecar. That is the only role allowed to create a missing `Request_id` or `deadlinevalue`. Service sidecars default to `PROXY_ROLE=service`; they require the inbound chain headers or a matching saved context for an outbound request containing only `Request_id`. A service sidecar returns HTTP 400 instead of silently starting a new deadline if the chain context is missing.
 
 The order service captures only `Request_id` for the lifetime of its synchronous inbound request and adds only that header to inventory, payment, and notification calls. Its sidecar looks up the saved inbound context by ID and fills in `deadlinevalue`, `deadlineExceded`, and `cancellation_Triggered`. A new chain with no ID gets its UUID and deadline from the gateway sidecar. The sidecar retains the inbound chain context until the owning inbound request completes; completing an outbound hop does not evict it. When the deadline arrives, the sidecar updates the stored flags so later outbound hops carry the cancellation signal.
 

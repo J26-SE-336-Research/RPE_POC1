@@ -4,14 +4,16 @@ public record ProxyConfig(
         String listenHost,
         int listenPort,
         long defaultDeadlineMillis,
-        boolean detectInboundDeadline
+        boolean detectInboundDeadline,
+        boolean gatewaySidecar
 ) {
     public static ProxyConfig fromEnvironment() {
         return new ProxyConfig(
                 env("PROXY_LISTEN_HOST", "0.0.0.0"),
                 intEnv("PROXY_LISTEN_PORT", 8080),
                 longEnv("DEFAULT_DEADLINE_MILLIS", 5000),
-                Boolean.parseBoolean(env("PROXY_DETECT_INBOUND_DEADLINE", "true"))
+                Boolean.parseBoolean(env("PROXY_DETECT_INBOUND_DEADLINE", "true")),
+                "gateway".equalsIgnoreCase(env("PROXY_ROLE", "service"))
         );
     }
 
