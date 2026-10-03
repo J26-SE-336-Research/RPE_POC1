@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  labels:
+    app: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: 2002rusira/frontend-rpe-implementation:v1
+          ports:
+            - containerPort: 80
+          env:
+            - name: API_GATEWAY_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: rpe-config
+                  key: API_GATEWAY_HOST
+
+            - name: API_GATEWAY_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: rpe-config
+                  key: API_GATEWAY_PORT
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30081
+  selector:
+    app: frontend
