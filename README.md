@@ -1,12 +1,19 @@
 # RRPE E-Commerce Microservices PoC
 
 A small order-processing system used as a proof-of-concept for testing
-resilience behaviour across real service-to-service HTTP calls. Five
-services, one docker-compose file.
+resilience behaviour across real service-to-service HTTP calls. It has
+four backend microservices, an API gateway, a React frontend, and
+PostgreSQL in one Docker Compose project.
 
 ```
                      ┌──────────────┐
-   client ──────────▶│ api-gateway  │
+   browser ─────────▶│ frontend    │
+                     │ (React UI)  │
+                     └──────┬───────┘
+                            │ /api/**
+                            ▼
+                     ┌──────────────┐
+                     │ api-gateway  │
                      └──────┬───────┘
                             │ routes /api/**
         ┌───────────────────┼────────────────────┬──────────────────┐
@@ -66,6 +73,8 @@ Check everything came up:
 ```bash
 docker compose ps
 ```
+
+The React frontend is also built and started by Compose. Open `http://localhost:3000` to use the store dashboard. The frontend sends API requests to the API gateway; it does not call the microservices directly.
 
 ## Service endpoints (direct, bypassing the gateway)
 

@@ -110,6 +110,20 @@ services:
     networks:
       - rrpe-net
 
+  frontend:
+    build:
+      context: ./frontend
+    container_name: rrpe-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    environment:
+      API_GATEWAY_HOST: ${API_GATEWAY_HOST:-api-gateway}
+      API_GATEWAY_PORT: ${API_GATEWAY_CONTAINER_PORT:-8080}
+    depends_on:
+      - api-gateway
+    networks:
+      - rrpe-net
+
 volumes:
   rrpe_pgdata:
 

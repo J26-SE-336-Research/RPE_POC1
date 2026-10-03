@@ -81,6 +81,24 @@ The HTTP decoder (`HttpServerCodec`) is therefore working on an ordered stream o
 
 ## Build and run
 
+The Dockerfile uses two stages: Maven builds the proxy JAR in the first stage, then the second stage copies the JAR into a Java 17 runtime image. You do not need to build the JAR on your computer first.
+
+From this directory, build the image with Docker Compose:
+
+```bash
+docker compose build proxy
+```
+
+To start the Compose service after the image is built:
+
+```bash
+docker compose up proxy
+```
+
+The proxy still needs Linux TPROXY setup and the required transparent-socket permission at runtime.
+
+You can also build and run the JAR directly with Maven:
+
 ```bash
 mvn clean package
 ```
