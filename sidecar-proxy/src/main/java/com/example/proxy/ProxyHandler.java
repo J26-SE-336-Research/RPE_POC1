@@ -14,6 +14,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.net.InetAddress;
+import java.util.Enumeration;
+
 public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     private static final Logger LOGGER = Logger.getLogger(ProxyHandler.class.getName());
     private static final String DEADLINE = "deadlinevalue";
@@ -67,13 +72,34 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                 "Missing required propagation header or context: " + missing);
     }
 
+    private static boolean isLocalAddress(InetSocketAddress destination) {
+        InetAddress address = destination.getAddress();
+
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+
+            while (interfaces.hasMoreElements()) {
+                NetworkInterface networkInterface = interfaces.nextElement();
+
+                Enumeration<InetAddress> addresses = networkInterface.getInetAddresses();
+
+                while (addresses.hasMoreElements()) {
+                    if (addresses.nextElement().equals(address)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (SocketException e) {
+            LOGGER.warning("Could not inspect local network interfaces: " + e.getMessage());
+        }
+
+        return address.isLoopbackAddress();
+    }
+
     @Override
     protected void channelRead0(ChannelHandlerContext clientCtx, FullHttpRequest request) {
         String uri = request.uri();
-        if (uri.equals("/actuator/health") || uri.startsWith("/actuator/health?")) {
-            forwardWithoutPropagation(clientCtx, request, destination);
-            return;
-        }
+
         if (!(clientCtx.channel().localAddress() instanceof InetSocketAddress destination)
                 || destination.isUnresolved()) {
             sendError(clientCtx, HttpResponseStatus.BAD_GATEWAY,
@@ -183,7 +209,11 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                         detectThisRequestDeadline, ownsContext))
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
 
-        backendBootstrap.connect(destination)
+        InetSocketAddress backendDestination = isLocalAddress(destination)
+                ? new InetSocketAddress("127.0.0.1", destination.getPort())
+                : destination;
+
+        backendBootstrap.connect(backendDestination)
                 .addListener((ChannelFutureListener) future -> {
                     if (!future.isSuccess()) {
                         if (ownsContext) forgetRequest(activeRequestId);
