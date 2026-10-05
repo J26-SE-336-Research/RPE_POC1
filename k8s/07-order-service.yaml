@@ -8,12 +8,19 @@ spec:
   selector:
     matchLabels:
       app: order-service
+
   template:
     metadata:
       labels:
         app: order-service
+
     spec:
+
+      # ============================================================
+      # TPROXY NETWORK INITIALIZATION
+      # ============================================================
       initContainers:
+
         - name: wait-for-postgres
           image: postgres:17
           command:
@@ -27,63 +34,245 @@ spec:
           envFrom:
             - secretRef:
                 name: postgres-credentials
+
+        - name: tproxy-init
+          image: nicolaka/netshoot
+          imagePullPolicy: IfNotPresent
+
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            capabilities:
+              add:
+                - NET_ADMIN
+
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+
+              echo "========================================"
+              echo "Configuring TPROXY for order-service"
+              echo "========================================"
+
+              PROXY_PORT=15001
+              MARK=1
+              TABLE=100
+
+              echo "[1] Creating policy-routing rule..."
+
+              ip rule add fwmark ${MARK}/${MARK} table ${TABLE} 2>/dev/null || true
+
+              echo "[2] Creating local route..."
+
+              ip route add local 0.0.0.0/0 dev lo table ${TABLE} 2>/dev/null || true
+
+              echo "[3] Creating inbound chain..."
+
+              iptables -t mangle -N RRPE_TPROXY_IN 2>/dev/null || true
+              iptables -t mangle -F RRPE_TPROXY_IN
+
+              echo "[4] Creating outbound chain..."
+
+              iptables -t mangle -N RRPE_TPROXY_OUT 2>/dev/null || true
+              iptables -t mangle -F RRPE_TPROXY_OUT
+
+              echo "[5] Connecting chains to PREROUTING..."
+
+              iptables -t mangle -D PREROUTING -p tcp -j RRPE_TPROXY_IN 2>/dev/null || true
+              iptables -t mangle -A PREROUTING -p tcp -j RRPE_TPROXY_IN
+
+              echo "[6] Connecting chains to OUTPUT..."
+
+              iptables -t mangle -D OUTPUT -p tcp -j RRPE_TPROXY_OUT 2>/dev/null || true
+              iptables -t mangle -A OUTPUT -p tcp -j RRPE_TPROXY_OUT
+
+              # ----------------------------------------------------
+              # INBOUND TRAFFIC
+              #
+              # Order application listens on 8081.
+              #
+              # Kubernetes health probes originate from the
+              # Minikube node network (192.168.49.0/24), so bypass
+              # those probes.
+              # ----------------------------------------------------
+
+              echo "[7] Configuring inbound bypass rules..."
+
+              # Minikube node / kubelet traffic
+              iptables -t mangle -A RRPE_TPROXY_IN \
+                -s 192.168.49.0/24 \
+                -j RETURN
+
+              # Loopback
+              iptables -t mangle -A RRPE_TPROXY_IN \
+                -d 127.0.0.0/8 \
+                -j RETURN
+
+              # Never intercept the proxy's own listening port
+              iptables -t mangle -A RRPE_TPROXY_IN \
+                -p tcp \
+                --dport ${PROXY_PORT} \
+                -j RETURN
+
+              # ----------------------------------------------------
+              # INBOUND TPROXY
+              # ----------------------------------------------------
+
+              echo "[8] Configuring inbound TPROXY..."
+
+              iptables -t mangle -A RRPE_TPROXY_IN \
+                -p tcp \
+                --dport 8081 \
+                -j TPROXY \
+                --on-port ${PROXY_PORT} \
+                --tproxy-mark ${MARK}/${MARK}
+
+              # ----------------------------------------------------
+              # OUTBOUND TRAFFIC
+              #
+              # Order communicates with:
+              #
+              # inventory-service :8082
+              # payment-service   :8083
+              # notification-service :8084
+              #
+              # PostgreSQL :5432 is deliberately NOT intercepted.
+              # ----------------------------------------------------
+
+              echo "[9] Configuring outbound bypass rules..."
+
+              # IMPORTANT:
+              # UID 1337 belongs to the Java sidecar.
+              # Its own backend connections must NOT return to TPROXY.
+              iptables -t mangle -A RRPE_TPROXY_OUT \
+                -m owner \
+                --uid-owner 0 \
+                -j RETURN
+
+              # Loopback traffic
+              iptables -t mangle -A RRPE_TPROXY_OUT \
+                -d 127.0.0.0/8 \
+                -j RETURN
+
+              # Never intercept connections aimed at the proxy itself
+              iptables -t mangle -A RRPE_TPROXY_OUT \
+                -p tcp \
+                --dport ${PROXY_PORT} \
+                -j RETURN
+
+              # ----------------------------------------------------
+              # OUTBOUND MARKING
+              #
+              # OUTPUT cannot use TPROXY directly.
+              # We mark the packet and policy routing sends it
+              # to the transparent proxy socket.
+              # ----------------------------------------------------
+
+              echo "[10] Configuring outbound packet marking..."
+
+              iptables -t mangle -A RRPE_TPROXY_OUT \
+                -p tcp \
+                -m multiport \
+                --dports 8082,8083,8084 \
+                -j MARK \
+                --set-mark ${MARK}
+
+              echo ""
+              echo "========================================"
+              echo "TPROXY configuration complete"
+              echo "========================================"
+
+              echo ""
+              echo "Policy rules:"
+              ip rule
+
+              echo ""
+              echo "Policy route table:"
+              ip route show table ${TABLE}
+
+              echo ""
+              echo "Mangle rules:"
+              iptables -t mangle -L -n -v
+
+      # ============================================================
+      # APPLICATION + SIDECAR
+      # ============================================================
+
       containers:
+
+        # ----------------------------------------------------------
+        # ORDER SERVICE
+        # ----------------------------------------------------------
+
         - name: order-service
           image: rrpe/order-service:latest
           imagePullPolicy: Never
+
           ports:
             - containerPort: 8081
+              protocol: TCP
+            - containerPort: 8085
+              protocol: TCP
+
           env:
             - name: SERVER_PORT
               value: "8081"
+
+            - name: MANAGEMENT_SERVER_PORT
+              value: "8085"
+
             - name: SPRING_DATASOURCE_URL
               value: jdbc:postgresql://postgres:5432/orderdb
+
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: postgres-credentials
                   key: POSTGRES_USER
+
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: postgres-credentials
                   key: POSTGRES_PASSWORD
+
             - name: ORDER_DB
               valueFrom:
                 configMapKeyRef:
                   name: rrpe-config
                   key: ORDER_DB
-            # These three are why order-service doesn't need an
-            # initContainer for them, only for postgres: a failed
-            # RestTemplate call at runtime is not a startup failure —
-            # Spring Boot starts fine even if these are briefly
-            # unreachable, unlike a failed DB connection.
+
             - name: INVENTORY_SERVICE_URL
               valueFrom:
                 configMapKeyRef:
                   name: rrpe-config
                   key: INVENTORY_SERVICE_URL
+
             - name: PAYMENT_SERVICE_URL
               valueFrom:
                 configMapKeyRef:
                   name: rrpe-config
                   key: PAYMENT_SERVICE_URL
+
             - name: NOTIFICATION_SERVICE_URL
               valueFrom:
                 configMapKeyRef:
                   name: rrpe-config
                   key: NOTIFICATION_SERVICE_URL
+
           startupProbe:
             httpGet:
               path: /actuator/health
-              port: 8081
+              port: 8085
             failureThreshold: 30
             periodSeconds: 5
 
           livenessProbe:
             httpGet:
               path: /actuator/health
-              port: 8081
+              port: 8085
             initialDelaySeconds: 10
             timeoutSeconds: 2
             periodSeconds: 15
@@ -92,11 +281,48 @@ spec:
           readinessProbe:
             httpGet:
               path: /actuator/health
-              port: 8081
+              port: 8085
             initialDelaySeconds: 10
             timeoutSeconds: 2
             periodSeconds: 5
             failureThreshold: 3
+
+        # ----------------------------------------------------------
+        # NETTY TPROXY SIDECAR
+        # ----------------------------------------------------------
+
+        - name: sidecar-proxy
+          image: rrpe/sidecar-proxy:latest
+          imagePullPolicy: Never
+
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: true
+            capabilities:
+              add:
+                - NET_ADMIN
+
+          env:
+            - name: PROXY_LISTEN_HOST
+              value: "0.0.0.0"
+
+            - name: PROXY_LISTEN_PORT
+              value: "15001"
+
+            - name: DEFAULT_DEADLINE_MILLIS
+              value: "5000"
+
+            - name: PROXY_DETECT_INBOUND_DEADLINE
+              value: "true"
+
+            - name: PROXY_ROLE
+              value: "service"
+
+          ports:
+            - name: proxy
+              containerPort: 15001
+
 ---
 apiVersion: v1
 kind: Service

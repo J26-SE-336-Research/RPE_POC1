@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: rrpe-ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:17
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -p 5432 -U "$POSTGRES_USER"; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+      containers:
+        - name: order-service
+          image: rrpe/order-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8081
+          env:
+            - name: SERVER_PORT
+              value: "8081"
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/orderdb
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_USER
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: ORDER_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: ORDER_DB
+            # These three are why order-service doesn't need an
+            # initContainer for them, only for postgres: a failed
+            # RestTemplate call at runtime is not a startup failure —
+            # Spring Boot starts fine even if these are briefly
+            # unreachable, unlike a failed DB connection.
+            - name: INVENTORY_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: INVENTORY_SERVICE_URL
+            - name: PAYMENT_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: PAYMENT_SERVICE_URL
+            - name: NOTIFICATION_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: NOTIFICATION_SERVICE_URL
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            failureThreshold: 30
+            periodSeconds: 5
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 10
+            timeoutSeconds: 2
+            periodSeconds: 15
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 10
+            timeoutSeconds: 2
+            periodSeconds: 5
+            failureThreshold: 3
+
+        - name: sidecar-proxy
+          image: rrpe/sidecar-proxy:latest
+          imagePullPolicy: Never
+          env:
+            - name: PROXY_LISTEN_HOST
+              value: "0.0.0.0"
+            - name: PROXY_LISTEN_PORT
+              value: "8080"
+            - name: DEFAULT_DEADLINE_MILLIS
+              value: "5000"
+            - name: PROXY_DETECT_INBOUND_DEADLINE
+              value: "true"
+            - name: PROXY_ROLE
+              value: "service"
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          ports:
+            - containerPort: 8080
+              name: sidecar
+
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: rrpe-ecommerce
+spec:
+  selector:
+    app: order-service
+  ports:
+    - port: 8081
+      targetPort: 8081

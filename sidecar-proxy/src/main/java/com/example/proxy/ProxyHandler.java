@@ -62,8 +62,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         this.config = config;
     }
 
-    private static void rejectMissingContext(ChannelHandlerContext ctx, FullHttpRequest request, String missing) {
-        request.release();
+    private static void rejectMissingContext(ChannelHandlerContext ctx, String missing) {
         sendError(ctx, HttpResponseStatus.BAD_REQUEST,
                 "Missing required propagation header or context: " + missing);
     }
@@ -71,9 +70,12 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
     @Override
     protected void channelRead0(ChannelHandlerContext clientCtx, FullHttpRequest request) {
         String uri = request.uri();
+        if (uri.equals("/actuator/health") || uri.startsWith("/actuator/health?")) {
+            forwardWithoutPropagation(clientCtx, request, destination);
+            return;
+        }
         if (!(clientCtx.channel().localAddress() instanceof InetSocketAddress destination)
                 || destination.isUnresolved()) {
-            request.release();
             sendError(clientCtx, HttpResponseStatus.BAD_GATEWAY,
                     "Could not determine original TPROXY destination");
             return;
@@ -83,7 +85,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         boolean suppliedRequestId = requestId != null && !requestId.isBlank();
         boolean gatewaySidecar = config.gatewaySidecar();
         if (!suppliedRequestId && !gatewaySidecar) {
-            rejectMissingContext(clientCtx, request, REQUEST_ID);
+            rejectMissingContext(clientCtx, REQUEST_ID);
             return;
         }
         if (!suppliedRequestId) requestId = UUID.randomUUID().toString();
@@ -97,7 +99,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         // Outbound service calls carry only Request_id. Their sidecar must find
         // the full chain context saved from that service's inbound request.
         if (requestIdOnly && storedContext == null && !gatewaySidecar) {
-            rejectMissingContext(clientCtx, request, "stored context for " + REQUEST_ID);
+            rejectMissingContext(clientCtx, "stored context for " + REQUEST_ID);
             return;
         }
 
@@ -107,15 +109,15 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
             deadlineValue = Long.toString(System.currentTimeMillis() + config.defaultDeadlineMillis());
         }
         if (deadlineValue == null || deadlineValue.isBlank()) {
-            rejectMissingContext(clientCtx, request, DEADLINE);
+            rejectMissingContext(clientCtx, DEADLINE);
             return;
         }
         long deadline;
         try {
             deadline = Long.parseLong(deadlineValue);
         } catch (NumberFormatException invalidDeadline) {
-            request.release();
-            sendError(clientCtx, HttpResponseStatus.BAD_REQUEST, "Invalid " + DEADLINE + " header");
+            sendError(clientCtx, HttpResponseStatus.BAD_REQUEST,
+                    "Invalid " + DEADLINE + " header");
             return;
         }
 
@@ -125,7 +127,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                     || Boolean.parseBoolean(request.headers().get(EXCEEDED));
         if (!requestIdOnly && !gatewaySidecar
                 && (!request.headers().contains(EXCEEDED) || !request.headers().contains(CANCELLATION))) {
-            rejectMissingContext(clientCtx, request, "deadline and cancellation flags");
+            rejectMissingContext(clientCtx, "deadline and cancellation flags");
             return;
         }
         HttpHeaders contextHeaders = new DefaultHttpHeaders();
@@ -173,9 +175,6 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         }
         contextHeaders.forEach(entry -> forwarded.headers().set(entry.getKey(), entry.getValue()));
 
-        // The client connection owns the request content, so release the original
-        // after retaining/copying what the backend request needs.
-        request.release();
 
         Bootstrap backendBootstrap = new Bootstrap();
         backendBootstrap.group(clientCtx.channel().eventLoop())
