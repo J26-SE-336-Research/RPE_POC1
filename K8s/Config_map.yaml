@@ -3,12 +3,12 @@ kind: ConfigMap
 metadata:
   name: rpe-config
 data:
-  SPRING_DATASOURCE_URL_Inventory: jdbc:postgresql://postgres-service:5432/inventory
-  SPRING_DATASOURCE_URL_payment: jdbc:postgresql://postgres-service:5432/payment
+  SPRING_DATASOURCE_URL_Inventory: jdbc:postgresql://postgres-service:5432/inventorydb
+  SPRING_DATASOURCE_URL_payment: jdbc:postgresql://postgres-service:5432/paymentdb
   NOTIFICATION_SERVICE_URL: http://notification-service:8084
   INVENTORY_SERVICE_URL: http://inventory-service:8082
   PAYMENT_SERVICE_URL: http://payment-service:8083
-  SPRING_DATASOURCE_URL_Order: jdbc:postgresql://postgres-service:5432/order
+  SPRING_DATASOURCE_URL_Order: jdbc:postgresql://postgres-service:5432/orderdb
   ORDER_SERVICE_URL: http://order-service:8081
-  API_GATEWAY_HOST: "192.168.49.2"
-  API_GATEWAY_PORT: "30080"
+  API_GATEWAY_HOST: api-gateway-service
+  API_GATEWAY_PORT: "8080"
