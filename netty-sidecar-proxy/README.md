@@ -122,7 +122,20 @@ export PROXY_ROLE=service
 java -jar target/netty-sidecar-proxy-1.0.0.jar
 ```
 
-The proxy always uses TPROXY mode: it enables Netty's Linux epoll transparent socket option and connects each intercepted request to that TCP connection's original destination. It has no fixed-backend mode. TPROXY rules, policy routing, and pod capabilities are deployment responsibilities and are not configured here. The shaded build includes Netty native epoll runtimes for Linux x86_64 and ARM64.
+Inbound requests use Linux TPROXY: the proxy enables Netty's epoll transparent socket option and forwards to the original destination preserved on the accepted socket. Outbound HTTP requests to the service ports are redirected by the pod's `OUTPUT` NAT rules; because that redirection changes the accepted socket's local address, the proxy resolves the outbound destination from the HTTP `Host` header (or an absolute `http://` request URI). The outbound rules exclude UID `10001`, which is the proxy process, so its backend connections do not loop back through itself.
+
+The Kubernetes manifests configure inbound TPROXY rules and policy routing in an init container, plus outbound redirection for TCP ports `8081` through `8084`. This proof of concept handles HTTP/1.1 only; it does not intercept HTTPS/TLS or arbitrary TCP protocols. The shaded build includes Netty native epoll runtimes for Linux x86_64 and ARM64.
+
+For the Minikube Docker driver, build and load the image referenced by the manifests before applying them:
+
+```bash
+docker build -f netty-sidecar-proxy/docker/Dockerfile \
+  -t 2002rusira/netty-sidecar-proxy-rpe-implementation:v2 \
+  netty-sidecar-proxy
+minikube image load 2002rusira/netty-sidecar-proxy-rpe-implementation:v2
+```
+
+Then apply the API gateway and backend service manifests. Their init containers install the pod-local routing rules before the application and proxy start.
 
 ## Project structure
 

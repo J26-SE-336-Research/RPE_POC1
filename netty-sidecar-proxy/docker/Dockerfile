@@ -7,6 +7,10 @@ RUN mvn --batch-mode --no-transfer-progress -DskipTests package
 
 FROM eclipse-temurin:17-jre
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends iproute2 iptables \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY --from=build /workspace/target/netty-sidecar-proxy-1.0.0.jar app.jar
 

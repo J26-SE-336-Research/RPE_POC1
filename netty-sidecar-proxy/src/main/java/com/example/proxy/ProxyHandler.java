@@ -10,8 +10,10 @@ import io.netty.channel.Channel;
 import io.netty.handler.codec.http.*;
 import java.util.UUID;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
@@ -63,22 +65,41 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
     }
 
     private static void rejectMissingContext(ChannelHandlerContext ctx, FullHttpRequest request, String missing) {
-        request.release();
+        LOGGER.warning(() -> "Rejecting " + request.method() + " " + requestPath(request.uri())
+                + " from " + ctx.channel().remoteAddress() + ": missing " + missing);
         sendError(ctx, HttpResponseStatus.BAD_REQUEST,
                 "Missing required propagation header or context: " + missing);
     }
 
     @Override
     protected void channelRead0(ChannelHandlerContext clientCtx, FullHttpRequest request) {
-        String uri = request.uri();
-        if (!(clientCtx.channel().localAddress() instanceof InetSocketAddress destination)
-                || destination.isUnresolved()) {
-            request.release();
+        if (!(clientCtx.channel().localAddress() instanceof InetSocketAddress localAddress)
+                || localAddress.isUnresolved()) {
             sendError(clientCtx, HttpResponseStatus.BAD_GATEWAY,
-                    "Could not determine original TPROXY destination");
+                    "Could not determine intercepted connection destination");
             return;
         }
 
+        boolean outboundRedirect = localAddress.getPort() == config.listenPort();
+        InetSocketAddress destination;
+        InetSocketAddress originalDestination = localAddress;
+        String uri = request.uri();
+        if (outboundRedirect) {
+            try {
+                OutboundTarget target = outboundTarget(request);
+                destination = target.address();
+                uri = target.requestUri();
+            } catch (IllegalArgumentException invalidTarget) {
+                sendError(clientCtx, HttpResponseStatus.BAD_REQUEST, invalidTarget.getMessage());
+                return;
+            }
+        } else {
+            // The intercepted inbound destination is this pod's application port.
+            // Connecting back to the pod IP can re-enter pod routing and TPROXY,
+            // causing the same request to be intercepted repeatedly. Containers in
+            // a pod share a network namespace, so loopback reaches the app directly.
+            destination = new InetSocketAddress("127.0.0.1", localAddress.getPort());
+        }
         String requestId = request.headers().get(REQUEST_ID);
         boolean suppliedRequestId = requestId != null && !requestId.isBlank();
         boolean gatewaySidecar = config.gatewaySidecar();
@@ -87,6 +108,15 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
             return;
         }
         if (!suppliedRequestId) requestId = UUID.randomUUID().toString();
+        final String activeRequestId = requestId;
+        final String logRequestUri = uri;
+        LOGGER.info(() -> "Intercepted " + (outboundRedirect ? "outbound" : "inbound")
+                + " " + request.method() + " " + requestPath(logRequestUri)
+                + " requestId=" + activeRequestId
+                + " client=" + clientCtx.channel().remoteAddress()
+                + " originalDestination=" + originalDestination
+                + " forwardingTo=" + destination
+                + " contentBytes=" + request.content().readableBytes());
         HttpHeaders storedContext = REQUEST_CONTEXTS.get(requestId);
         boolean detectThisRequestDeadline = config.detectInboundDeadline() && !gatewaySidecar;
         boolean requestIdOnly = suppliedRequestId
@@ -114,15 +144,13 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         try {
             deadline = Long.parseLong(deadlineValue);
         } catch (NumberFormatException invalidDeadline) {
-            request.release();
             sendError(clientCtx, HttpResponseStatus.BAD_REQUEST, "Invalid " + DEADLINE + " header");
             return;
         }
 
-        boolean expired = requestIdOnly && storedContext != null
-                ? Boolean.parseBoolean(storedContext.get(EXCEEDED))
-                : (detectThisRequestDeadline && deadline <= System.currentTimeMillis())
-                    || Boolean.parseBoolean(request.headers().get(EXCEEDED));
+        boolean expired = (storedContext != null && Boolean.parseBoolean(storedContext.get(EXCEEDED)))
+                || (detectThisRequestDeadline && deadline <= System.currentTimeMillis())
+                || Boolean.parseBoolean(request.headers().get(EXCEEDED));
         if (!requestIdOnly && !gatewaySidecar
                 && (!request.headers().contains(EXCEEDED) || !request.headers().contains(CANCELLATION))) {
             rejectMissingContext(clientCtx, request, "deadline and cancellation flags");
@@ -132,18 +160,19 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         contextHeaders.set(REQUEST_ID, requestId);
         contextHeaders.set(DEADLINE, Long.toString(deadline));
         contextHeaders.set(EXCEEDED, Boolean.toString(expired));
-        boolean incomingCancellation = requestIdOnly && storedContext != null
-                ? Boolean.parseBoolean(storedContext.get(CANCELLATION))
-                : Boolean.parseBoolean(request.headers().get(CANCELLATION));
+        boolean incomingCancellation = (storedContext != null
+                && Boolean.parseBoolean(storedContext.get(CANCELLATION)))
+                || Boolean.parseBoolean(request.headers().get(CANCELLATION));
         boolean cancellation = expired || incomingCancellation;
         contextHeaders.set(CANCELLATION, Boolean.toString(cancellation));
         if (expired) {
             LOGGER.info("Inbound deadline already exceeded for Request_id=" + requestId
                     + "; forwarding with cancellation_Triggered=true");
         }
-        boolean ownsContext = !(requestIdOnly && storedContext != null);
+        // If this request belongs to a chain already known by this sidecar,
+        // keep the inbound request as the owner of the saved context.
+        boolean ownsContext = storedContext == null;
         if (ownsContext) REQUEST_CONTEXTS.put(requestId, contextHeaders.copy());
-        final String activeRequestId = requestId;
         final long activeDeadline = deadline;
         if (ownsContext && detectThisRequestDeadline) {
             long delayMillis = Math.max(0, deadline - System.currentTimeMillis());
@@ -173,9 +202,8 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         }
         contextHeaders.forEach(entry -> forwarded.headers().set(entry.getKey(), entry.getValue()));
 
-        // The client connection owns the request content, so release the original
-        // after retaining/copying what the backend request needs.
-        request.release();
+        // SimpleChannelInboundHandler releases the inbound request after this method
+        // returns. The forwarded request holds its own retained content reference.
 
         Bootstrap backendBootstrap = new Bootstrap();
         backendBootstrap.group(clientCtx.channel().eventLoop())
@@ -184,16 +212,22 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                         detectThisRequestDeadline, ownsContext))
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
 
+        LOGGER.info(() -> "Connecting to backend requestId=" + activeRequestId
+                + " destination=" + destination);
         backendBootstrap.connect(destination)
                 .addListener((ChannelFutureListener) future -> {
                     if (!future.isSuccess()) {
                         if (ownsContext) forgetRequest(activeRequestId);
+                        LOGGER.log(Level.SEVERE, "Backend connect failed requestId=" + activeRequestId
+                                + " destination=" + destination, future.cause());
                         sendError(clientCtx, HttpResponseStatus.BAD_GATEWAY,
                                 "Could not connect to backend: " + future.cause().getMessage());
                         return;
                     }
 
                     Channel backendChannel = future.channel();
+                    LOGGER.info(() -> "Backend connected requestId=" + activeRequestId
+                            + " destination=" + backendChannel.remoteAddress());
                     HttpHeaders latestContext = requestContext(activeRequestId);
                     if (latestContext != null) {
                         latestContext.forEach(entry -> forwarded.headers().set(entry.getKey(), entry.getValue()));
@@ -203,19 +237,91 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                     backendChannel.writeAndFlush(forwarded).addListener(writeFuture -> {
                         if (!writeFuture.isSuccess()) {
                             if (ownsContext) forgetRequest(activeRequestId);
+                            LOGGER.log(Level.SEVERE, "Backend request write failed requestId="
+                                    + activeRequestId + " destination=" + destination, writeFuture.cause());
                             backendChannel.close();
                             sendError(clientCtx, HttpResponseStatus.BAD_GATEWAY,
                                     "Could not send request to backend");
-                        } else if (activeCancellation) {
-                            LOGGER.info(() -> "Forwarded cancellation_Triggered=true to "
-                                    + destination + " for Request_id=" + activeRequestId);
+                        } else {
+                            LOGGER.info(() -> "Backend request write succeeded requestId="
+                                    + activeRequestId + " destination=" + destination);
+                            if (activeCancellation) {
+                                LOGGER.info(() -> "Forwarded cancellation_Triggered=true to "
+                                        + destination + " for Request_id=" + activeRequestId);
+                            }
                         }
                     });
                 });
     }
 
+    private static String requestPath(String uri) {
+        int query = uri.indexOf('?');
+        return query < 0 ? uri : uri.substring(0, query) + "?[query redacted]";
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        LOGGER.log(Level.SEVERE, "Proxy request pipeline failed client="
+                + ctx.channel().remoteAddress(), cause);
+        ctx.close();
+    }
+
+    private static OutboundTarget outboundTarget(FullHttpRequest request) {
+        URI uri;
+        try {
+            uri = URI.create(request.uri());
+        } catch (IllegalArgumentException invalidUri) {
+            throw new IllegalArgumentException("Invalid outbound HTTP request URI");
+        }
+
+        String host;
+        int port;
+        String backendUri;
+        if (uri.isAbsolute()) {
+            if (!"http".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
+                throw new IllegalArgumentException("Outbound proxy supports absolute http:// request URIs only");
+            }
+            host = uri.getHost();
+            port = uri.getPort() >= 0 ? uri.getPort() : 80;
+            backendUri = originForm(uri);
+        } else {
+            String authority = request.headers().get(HttpHeaderNames.HOST);
+            if (authority == null || authority.isBlank()) {
+                throw new IllegalArgumentException("Outbound HTTP request is missing the Host header");
+            }
+            URI hostUri;
+            try {
+                hostUri = URI.create("http://" + authority);
+            } catch (IllegalArgumentException invalidAuthority) {
+                throw new IllegalArgumentException("Invalid outbound HTTP Host header");
+            }
+            if (hostUri.getHost() == null || hostUri.getRawUserInfo() != null) {
+                throw new IllegalArgumentException("Invalid outbound HTTP Host header");
+            }
+            host = hostUri.getHost();
+            port = hostUri.getPort() >= 0 ? hostUri.getPort() : 80;
+            backendUri = request.uri();
+        }
+
+        if (port < 1 || port > 65535) {
+            throw new IllegalArgumentException("Invalid outbound HTTP destination port");
+        }
+        return new OutboundTarget(InetSocketAddress.createUnresolved(host, port), backendUri);
+    }
+
+    private static String originForm(URI uri) {
+        String path = uri.getRawPath();
+        if (path == null || path.isEmpty()) path = "/";
+        return uri.getRawQuery() == null ? path : path + "?" + uri.getRawQuery();
+    }
+
+    private record OutboundTarget(InetSocketAddress address, String requestUri) {}
+
     private static void sendError(ChannelHandlerContext ctx, HttpResponseStatus status, String message) {
         if (!ctx.channel().isActive()) return;
+
+        LOGGER.warning(() -> "Sending proxy error status=" + status.code()
+                + " client=" + ctx.channel().remoteAddress() + " reason=" + message);
 
         FullHttpResponse response = new DefaultFullHttpResponse(
                 HttpVersion.HTTP_1_1,

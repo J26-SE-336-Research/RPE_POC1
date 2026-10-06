@@ -69,7 +69,7 @@ Set these values on each proxy container:
 ```text
 PROXY_ROLE=gateway
 PROXY_LISTEN_HOST=0.0.0.0
-PROXY_LISTEN_PORT=8080
+PROXY_LISTEN_PORT=15001
 DEFAULT_DEADLINE_MILLIS=5000
 ```
 
@@ -94,10 +94,12 @@ The context map is in the proxy process's memory. Each request chain must pass t
 
 TPROXY does not change the application's target address. It intercepts packets in Linux, gives them to the transparent listener, and keeps the packet's original destination available. The proxy then connects to that original destination.
 
+In this repository's Kubernetes setup, inbound service traffic uses TPROXY in each pod's `mangle/PREROUTING` chain. Locally generated HTTP calls use `nat/OUTPUT` REDIRECT to the same sidecar listener; the proxy routes those requests using the HTTP `Host` authority. The proxy's Linux UID is excluded from that rule so its backend connection does not loop back into the sidecar. This egress path supports the HTTP/1.1 service calls on ports 8081–8084, not arbitrary TCP or TLS.
+
 For the current code to work, all of these must be true:
 
 1. The proxy runs on Linux with a supported Netty epoll native library. The provided shaded JAR includes Linux x86_64 and ARM64 epoll runtimes.
-2. The sidecar listens on the port used by the traffic rules (default `8080`).
+2. The sidecar listens on the port used by the traffic rules (`15001` for the API gateway in these Kubernetes manifests, `8080` for backend service sidecars).
 3. The rules intercept the intended TCP traffic and deliver it to that port while preserving the original destination.
 4. Policy routing marks and routes TPROXY packets locally, as required by Linux TPROXY.
 5. Proxy connections to the original destination are excluded from interception, or they will loop back into the proxy.

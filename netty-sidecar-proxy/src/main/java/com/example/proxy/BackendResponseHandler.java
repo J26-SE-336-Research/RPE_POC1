@@ -7,6 +7,7 @@ import io.netty.channel.Channel;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaders;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class BackendResponseHandler
@@ -18,6 +19,7 @@ public final class BackendResponseHandler
     private final long deadline;
     private final boolean detectInboundDeadline;
     private final boolean ownsContext;
+    private boolean receivedResponse;
 
     public BackendResponseHandler(Channel clientChannel, String requestId, long deadline,
                                   boolean detectInboundDeadline, boolean ownsContext) {
@@ -30,7 +32,15 @@ public final class BackendResponseHandler
 
     @Override
     protected void channelRead0(ChannelHandlerContext backendCtx, FullHttpResponse response) {
+        receivedResponse = true;
+        final int responseStatus = response.status().code();
+        LOGGER.info(() -> "Backend response received requestId=" + requestId
+                + " status=" + responseStatus
+                + " contentBytes=" + response.content().readableBytes()
+                + " backend=" + backendCtx.channel().remoteAddress());
         if (!clientChannel.isActive()) {
+            LOGGER.warning(() -> "Client disconnected before backend response could be forwarded"
+                    + " requestId=" + requestId + " client=" + clientChannel.remoteAddress());
             if (ownsContext) ProxyHandler.forgetRequest(requestId);
             return;
         }
@@ -66,12 +76,25 @@ public final class BackendResponseHandler
                 forwarded.content().readableBytes()
         );
 
-        clientChannel.writeAndFlush(forwarded);
+        clientChannel.writeAndFlush(forwarded).addListener(writeFuture -> {
+            if (writeFuture.isSuccess()) {
+                LOGGER.info(() -> "Backend response forwarded to client requestId=" + requestId
+                        + " status=" + responseStatus
+                        + " client=" + clientChannel.remoteAddress());
+            } else {
+                LOGGER.log(Level.SEVERE, "Forwarding backend response to client failed requestId="
+                        + requestId + " client=" + clientChannel.remoteAddress(), writeFuture.cause());
+            }
+        });
         if (ownsContext) ProxyHandler.forgetRequest(requestId);
     }
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
+        if (!receivedResponse) {
+            LOGGER.warning(() -> "Backend connection closed before a response was received"
+                    + " requestId=" + requestId + " backend=" + ctx.channel().remoteAddress());
+        }
         if (clientChannel.isActive()) {
             clientChannel.close();
         }
@@ -79,7 +102,8 @@ public final class BackendResponseHandler
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        cause.printStackTrace();
+        LOGGER.log(Level.SEVERE, "Backend response pipeline failed requestId=" + requestId
+                + " backend=" + ctx.channel().remoteAddress(), cause);
         if (clientChannel.isActive()) {
             clientChannel.close();
         }
