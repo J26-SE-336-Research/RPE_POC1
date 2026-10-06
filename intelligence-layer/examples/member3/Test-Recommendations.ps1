@@ -33,7 +33,7 @@ foreach ($name in @('healthy', 'stressed', 'overloaded')) {
     }
     $generated = [DateTimeOffset]::Parse([string]$actual.generatedAt)
     $expires = [DateTimeOffset]::Parse([string]$actual.expiresAt)
-    if (($expires - $generated).TotalSeconds -ne 60) {
+    if (($expires - $generated).TotalSeconds -ne 300) {
         throw "$name returned an unexpected validity period"
     }
     Write-Output "PASS $name -> $($actual.status), $(@($actual.recommendations).Count) actions"

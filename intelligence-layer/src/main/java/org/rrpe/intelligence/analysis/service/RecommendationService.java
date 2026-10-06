@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Map;
 
 import org.rrpe.intelligence.analysis.api.ClassificationRequest;
+import org.rrpe.intelligence.analysis.config.RecommendationPolicyConfig.Settings;
 import org.rrpe.intelligence.analysis.model.HealthStatus;
 import org.rrpe.intelligence.analysis.model.RecommendationPlan;
 import org.rrpe.intelligence.analysis.model.RecommendationPlan.Action;
@@ -17,9 +18,11 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class RecommendationService {
     private final ServiceHealthClassifier classifier;
+    private final Settings settings;
 
-    public RecommendationService(ServiceHealthClassifier classifier) {
+    public RecommendationService(ServiceHealthClassifier classifier, Settings settings) {
         this.classifier = classifier;
+        this.settings = settings;
     }
 
     public RecommendationPlan recommend(ClassificationRequest request) {
@@ -40,32 +43,33 @@ public class RecommendationService {
         var assessment = classifier.classify(recent, baseline);
         var recommendations = new ArrayList<Recommendation>();
         if (assessment.status() != HealthStatus.HEALTHY) {
-            double factor = assessment.status() == HealthStatus.OVERLOADED ? 0.75 : 0.90;
+            double factor = assessment.status() == HealthStatus.OVERLOADED
+                    ? settings.overloadedRateMultiplier() : settings.stressedRateMultiplier();
             if (baseline.requestRate() > 0 && recent.requestRate() > 0) {
                 recommendations.add(new Recommendation(Action.RATE_LIMIT,
                         Map.of("maxRequestsPerSecond", Math.min(recent.requestRate(), baseline.requestRate() * factor)),
                         "Reduce admitted load while latency or errors are elevated"));
             }
-            if (baseline.inFlightRequests() > 0 && recent.inFlightRequests() > baseline.inFlightRequests()) {
-                recommendations.add(new Recommendation(Action.CONCURRENCY_LIMIT,
-                        Map.of("maxConcurrentRequests", baseline.inFlightRequests()),
-                        "In-flight requests exceed the baseline"));
-            }
             if (recent.retryCount() > baseline.retryCount()) {
-                recommendations.add(new Recommendation(Action.DISABLE_RETRIES,
-                        Map.of("maxAttempts", 1),
-                        "Retries have increased during degradation; avoid adding retry traffic"));
-            }
-            if (assessment.status() == HealthStatus.OVERLOADED && recent.errorRate() >= 0.10) {
-                recommendations.add(new Recommendation(Action.ENABLE_CIRCUIT_BREAKER,
-                        Map.of("failureRateThresholdPercent", 50, "minimumCalls", 20,
-                                "openStateDurationSeconds", 30, "maxHalfOpenCalls", 3),
-                        "Enable failure protection; the executor measures failures before opening the circuit"));
+                double retryBudget = assessment.status() == HealthStatus.OVERLOADED
+                        ? settings.overloadedRetryBudgetRatio() : settings.stressedRetryBudgetRatio();
+                if (retryBudget == 0) {
+                    recommendations.add(new Recommendation(Action.DISABLE_RETRIES,
+                            Map.of("maxAttempts", 1),
+                            "Retries have increased during degradation; avoid adding retry traffic"));
+                } else {
+                    // Snapshots do not contain original request counts or an
+                    // active retry policy. Suggest the configured ratio without
+                    // claiming a measured budget breach or a policy reduction.
+                    recommendations.add(new Recommendation(Action.RETRY_BUDGET,
+                            Map.of("retryBudgetRatio", retryBudget),
+                            "Retries have increased during degradation; cap extra attempts with a service retry budget"));
+                }
             }
         }
         Instant now = Instant.now();
         return new RecommendationPlan("1.0", "ADVISORY", recent.serviceName(), assessment.status(),
-                recent.collectedAt(), now, now.plusSeconds(60), assessment.evidence(), recommendations);
+                recent.collectedAt(), now, now.plus(settings.recommendationTtl()), assessment.evidence(), recommendations);
     }
 
     private static void validate(ServiceMetrics metrics) {

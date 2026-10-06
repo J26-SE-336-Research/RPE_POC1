@@ -110,16 +110,15 @@ Write-Output 'PASS degraded observations formed a recent window without changing
 $plan = Invoke-RestMethod -Uri "$apiUrl/$serviceName/recommendations" -TimeoutSec 10
 Assert-Condition ($plan.schemaVersion -eq '1.0' -and $plan.mode -eq 'ADVISORY' -and
     $plan.ready -eq $true -and $plan.serviceName -eq $serviceName -and $plan.status -eq 'OVERLOADED') 'Unexpected recommendation envelope.'
-$expectedActions = @('CONCURRENCY_LIMIT', 'DISABLE_RETRIES', 'ENABLE_CIRCUIT_BREAKER', 'RATE_LIMIT')
+$expectedActions = @('DISABLE_RETRIES', 'RATE_LIMIT')
 $actualActions = @($plan.recommendations | ForEach-Object { $_.action } | Sort-Object)
 Assert-Condition (($actualActions -join ',') -ceq ($expectedActions -join ',')) 'Unexpected recommendation actions.'
 $rateLimit = $plan.recommendations | Where-Object { $_.action -eq 'RATE_LIMIT' }
-$concurrency = $plan.recommendations | Where-Object { $_.action -eq 'CONCURRENCY_LIMIT' }
 $retries = $plan.recommendations | Where-Object { $_.action -eq 'DISABLE_RETRIES' }
 Assert-Condition ($rateLimit.parameters.maxRequestsPerSecond -eq 75 -and
-    $concurrency.parameters.maxConcurrentRequests -eq 20 -and $retries.parameters.maxAttempts -eq 1) 'Unexpected recommendation parameters.'
+    $retries.parameters.maxAttempts -eq 1) 'Unexpected recommendation parameters.'
 Assert-Condition (([DateTimeOffset]::Parse([string]$plan.expiresAt) -
-    [DateTimeOffset]::Parse([string]$plan.generatedAt)).TotalSeconds -eq 60) 'Unexpected plan validity period.'
+    [DateTimeOffset]::Parse([string]$plan.generatedAt)).TotalSeconds -eq 300) 'Unexpected plan validity period.'
 Write-Output 'PASS learned baseline + recent window -> OVERLOADED recommendations'
 
 $sampleCount = $window.sampleCount
@@ -131,6 +130,6 @@ Write-Output 'PASS identical replay does not add samples'
 $json = $plan | ConvertTo-Json -Depth 8
 if ($OutputPath) {
     Set-Content -LiteralPath $OutputPath -Value $json -Encoding UTF8
-    Write-Output "Saved recommendation example to $OutputPath. It uses a synthetic service name and expires after 60 seconds."
+    Write-Output "Saved recommendation example to $OutputPath. It uses a synthetic service name and expires after 5 minutes."
 }
 Write-Output $json

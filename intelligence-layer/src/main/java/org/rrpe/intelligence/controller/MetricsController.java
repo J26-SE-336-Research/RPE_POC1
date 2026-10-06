@@ -9,6 +9,9 @@ import java.util.concurrent.ConcurrentMap;
 import org.rrpe.intelligence.analysis.api.ClassificationRequest;
 import org.rrpe.intelligence.analysis.model.RecommendationPlan;
 import org.rrpe.intelligence.analysis.model.ServiceMetrics;
+import org.rrpe.intelligence.analysis.model.HealthStatus;
+import org.rrpe.intelligence.analysis.model.RecommendationReview;
+import org.rrpe.intelligence.analysis.service.RecommendationReviewService;
 import org.rrpe.intelligence.analysis.service.BaselineLearningService;
 import org.rrpe.intelligence.analysis.service.BaselineLearningService.LearningStatus;
 import org.rrpe.intelligence.analysis.service.RecommendationService;
@@ -35,14 +38,23 @@ public class MetricsController {
     private final RecommendationService recommendations;
     private final BaselineLearningService baselineLearning;
     private final RecentWindowService recentWindows;
+    private final RecommendationReviewService reviews;
     private final ConcurrentMap<String, Object> observationLocks = new ConcurrentHashMap<>();
 
     public MetricsController(ServiceMetricsStore store, RecommendationService recommendations,
-                             BaselineLearningService baselineLearning, RecentWindowService recentWindows) {
+                             BaselineLearningService baselineLearning, RecentWindowService recentWindows,
+                             RecommendationReviewService reviews) {
         this.store = store;
         this.recommendations = recommendations;
         this.baselineLearning = baselineLearning;
         this.recentWindows = recentWindows;
+        this.reviews = reviews;
+    }
+
+    /** Read-only dashboard summary of up to 100 services with submitted observations. */
+    @GetMapping({"", "/"})
+    public List<RecommendationResponse> listServices() {
+        return baselineLearning.findServiceNames().stream().map(this::getRecommendations).toList();
     }
 
     /** Submit one comparable metric snapshot, without a manually supplied baseline. */
@@ -123,6 +135,26 @@ public class MetricsController {
                                            LearningStatus learning, WindowStatus recent) {
         return new RecommendationResponse("1.0", "ADVISORY", serviceName, status, false, message,
                 null, null, null, List.of(), List.of(), learning, recent);
+    }
+
+    /** Explicitly queue a plan from the learned baseline and current recent window. */
+    @PostMapping("/{serviceName}/reviews")
+    public ReviewSubmission queueReview(@PathVariable String serviceName) {
+        synchronized (observationLock(serviceName)) {
+            var analysis = getRecommendations(serviceName);
+            if (!analysis.ready() || analysis.recommendations().isEmpty()) {
+                return new ReviewSubmission(analysis.ready(),
+                        analysis.ready() ? "No service policy changes are suggested." : analysis.message(), null, analysis);
+            }
+            var plan = new RecommendationPlan(analysis.schemaVersion(), analysis.mode(), analysis.serviceName(),
+                    HealthStatus.valueOf(analysis.status()), analysis.sourceCollectedAt(), analysis.generatedAt(),
+                    analysis.expiresAt(), analysis.evidence(), analysis.recommendations());
+            return new ReviewSubmission(true, "Recommendation saved for review.", reviews.submitServicePlan(plan), analysis);
+        }
+    }
+
+    public record ReviewSubmission(boolean ready, String message, RecommendationReview review,
+                                   RecommendationResponse analysis) {
     }
 
     public record RecommendationResponse(String schemaVersion, String mode, String serviceName,

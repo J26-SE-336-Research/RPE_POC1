@@ -21,7 +21,17 @@ public record RecommendationPlan(
     }
 
     public enum Action {
-        RATE_LIMIT, CONCURRENCY_LIMIT, DISABLE_RETRIES, ENABLE_CIRCUIT_BREAKER
+        RATE_LIMIT,
+        DISABLE_RETRIES,
+        /**
+         * Uses the parameter {@code retryBudgetRatio}: additional retry attempts
+         * allowed per original, non-retry request in the consumer's accounting
+         * window. A ratio of 0.05 allows at most floor(0.05 * original requests)
+         * extra attempts across the named service's aggregate scope. It is not
+         * a per-request maxAttempts value. The consumer must support and enforce
+         * this budget before accepting the action.
+         */
+        RETRY_BUDGET
     }
 
     public record Recommendation(Action action, Map<String, Number> parameters, String reason) {

@@ -4,8 +4,8 @@
     "serviceName":  "order-service",
     "status":  "OVERLOADED",
     "sourceCollectedAt":  "2026-10-02T03:45:00Z",
-    "generatedAt":  "2026-10-02T04:10:23.515901500Z",
-    "expiresAt":  "2026-10-02T04:11:23.515901500Z",
+    "generatedAt":  "2026-10-06T08:31:12.692267900Z",
+    "expiresAt":  "2026-10-06T08:36:12.692267900Z",
     "evidence":  [
                      "Recent latency is 2.50 times the baseline",
                      "Recent error rate is 12.00%"
@@ -19,28 +19,11 @@
                                 "reason":  "Reduce admitted load while latency or errors are elevated"
                             },
                             {
-                                "action":  "CONCURRENCY_LIMIT",
-                                "parameters":  {
-                                                   "maxConcurrentRequests":  20
-                                               },
-                                "reason":  "In-flight requests exceed the baseline"
-                            },
-                            {
                                 "action":  "DISABLE_RETRIES",
                                 "parameters":  {
                                                    "maxAttempts":  1
                                                },
                                 "reason":  "Retries have increased during degradation; avoid adding retry traffic"
-                            },
-                            {
-                                "action":  "ENABLE_CIRCUIT_BREAKER",
-                                "parameters":  {
-                                                   "openStateDurationSeconds":  30,
-                                                   "failureRateThresholdPercent":  50,
-                                                   "minimumCalls":  20,
-                                                   "maxHalfOpenCalls":  3
-                                               },
-                                "reason":  "Enable failure protection; the executor measures failures before opening the circuit"
                             }
                         ]
 }

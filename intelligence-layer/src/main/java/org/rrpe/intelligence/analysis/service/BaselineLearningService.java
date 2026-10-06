@@ -93,6 +93,11 @@ public class BaselineLearningService {
         }
     }
 
+    /** Bounded service discovery from observations already received by this instance. */
+    public List<String> findServiceNames() {
+        return services.keySet().stream().sorted().limit(100).toList();
+    }
+
     public Optional<LearningStatus> findStatus(String serviceName) {
         if (serviceName == null || serviceName.isBlank()) {
             throw new IllegalArgumentException("serviceName is required");
