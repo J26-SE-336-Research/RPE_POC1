@@ -100,9 +100,18 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
             // a pod share a network namespace, so loopback reaches the app directly.
             destination = new InetSocketAddress("127.0.0.1", localAddress.getPort());
         }
+        boolean gatewaySidecar = config.gatewaySidecar();
+        // Treat every request entering the gateway pod as a new trust boundary.
+        // Never let an external caller choose the chain ID or deadline/status.
+        // The gateway's outbound interception is a different hop and must reuse
+        // the context created here.
+        boolean gatewayInbound = gatewaySidecar && !outboundRedirect;
         String requestId = request.headers().get(REQUEST_ID);
         boolean suppliedRequestId = requestId != null && !requestId.isBlank();
-        boolean gatewaySidecar = config.gatewaySidecar();
+        if (gatewayInbound) {
+            requestId = UUID.randomUUID().toString();
+            suppliedRequestId = false;
+        }
         if (!suppliedRequestId && !gatewaySidecar) {
             rejectMissingContext(clientCtx, request, REQUEST_ID);
             return;
@@ -131,7 +140,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
             return;
         }
 
-        String deadlineValue = request.headers().get(DEADLINE);
+        String deadlineValue = gatewayInbound ? null : request.headers().get(DEADLINE);
         if (requestIdOnly && storedContext != null) deadlineValue = storedContext.get(DEADLINE);
         if ((deadlineValue == null || deadlineValue.isBlank()) && gatewaySidecar) {
             deadlineValue = Long.toString(System.currentTimeMillis() + config.defaultDeadlineMillis());
@@ -150,7 +159,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
 
         boolean expired = (storedContext != null && Boolean.parseBoolean(storedContext.get(EXCEEDED)))
                 || (detectThisRequestDeadline && deadline <= System.currentTimeMillis())
-                || Boolean.parseBoolean(request.headers().get(EXCEEDED));
+                || (!gatewayInbound && Boolean.parseBoolean(request.headers().get(EXCEEDED)));
         if (!requestIdOnly && !gatewaySidecar
                 && (!request.headers().contains(EXCEEDED) || !request.headers().contains(CANCELLATION))) {
             rejectMissingContext(clientCtx, request, "deadline and cancellation flags");
@@ -162,7 +171,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         contextHeaders.set(EXCEEDED, Boolean.toString(expired));
         boolean incomingCancellation = (storedContext != null
                 && Boolean.parseBoolean(storedContext.get(CANCELLATION)))
-                || Boolean.parseBoolean(request.headers().get(CANCELLATION));
+                || (!gatewayInbound && Boolean.parseBoolean(request.headers().get(CANCELLATION)));
         boolean cancellation = expired || incomingCancellation;
         contextHeaders.set(CANCELLATION, Boolean.toString(cancellation));
         if (expired) {
