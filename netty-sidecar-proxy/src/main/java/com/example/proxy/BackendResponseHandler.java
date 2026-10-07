@@ -41,7 +41,6 @@ public final class BackendResponseHandler
         if (!clientChannel.isActive()) {
             LOGGER.warning(() -> "Client disconnected before backend response could be forwarded"
                     + " requestId=" + requestId + " client=" + clientChannel.remoteAddress());
-            if (ownsContext) ProxyHandler.forgetRequest(requestId);
             return;
         }
 
@@ -86,7 +85,6 @@ public final class BackendResponseHandler
                         + requestId + " client=" + clientChannel.remoteAddress(), writeFuture.cause());
             }
         });
-        if (ownsContext) ProxyHandler.forgetRequest(requestId);
     }
 
     @Override

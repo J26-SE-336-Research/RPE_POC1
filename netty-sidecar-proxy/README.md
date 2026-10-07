@@ -117,6 +117,7 @@ Linux:
 export PROXY_LISTEN_HOST=0.0.0.0
 export PROXY_LISTEN_PORT=8080
 export DEFAULT_DEADLINE_MILLIS=5000
+export REQUEST_CONTEXT_TTL_MILLIS=20000
 export PROXY_DETECT_INBOUND_DEADLINE=true
 export PROXY_ROLE=service
 java -jar target/netty-sidecar-proxy-1.0.0.jar
@@ -173,6 +174,8 @@ The Netty sidecar beside the API gateway creates one chain identity and absolute
 | `Request_id` | UUID identifying the request chain |
 
 Configure `DEFAULT_DEADLINE_MILLIS` on the gateway sidecar (default `5000`). The proxy uses it only when a request reaches it without a deadline. `PROXY_DETECT_INBOUND_DEADLINE` controls deadline detection on a proxy instance (default `true`); set it to `false` on an instance that handles outbound hops so it forwards the inherited status without independently declaring an inbound deadline expired.
+
+`REQUEST_CONTEXT_TTL_MILLIS` sets how long a sidecar keeps each request context after its first creation (default `20000`, or 20 seconds). The timer is fixed from context creation and is not reset by later requests with the same `Request_id`. Responses and connection failures do not remove contexts early; expiry removes them. Set the same value on every sidecar so all services use the same cleanup window. The TTL is a cleanup limit, separate from the request deadline.
 
 Set `PROXY_ROLE=gateway` only on the API gateway sidecar. That is the only role allowed to create a missing `Request_id` or `deadlinevalue`. Service sidecars default to `PROXY_ROLE=service`; they require the inbound chain headers or a matching saved context for an outbound request containing only `Request_id`. A service sidecar returns HTTP 400 instead of silently starting a new deadline if the chain context is missing.
 

@@ -16,7 +16,7 @@ spec:
     spec:
       initContainers:
         - name: configure-proxy-routing
-          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v6
+          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v7
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-ec"]
           args:
@@ -86,7 +86,7 @@ spec:
                   name: rpe-config
                   key: NOTIFICATION_SERVICE_URL
         - name: netty-proxy
-          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v6
+          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v7
           imagePullPolicy: IfNotPresent
           ports:
             - name: proxy
@@ -100,6 +100,8 @@ spec:
               value: "8080"
             - name: PROXY_DETECT_INBOUND_DEADLINE
               value: "true"
+            - name: REQUEST_CONTEXT_TTL_MILLIS
+              value: "20000"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

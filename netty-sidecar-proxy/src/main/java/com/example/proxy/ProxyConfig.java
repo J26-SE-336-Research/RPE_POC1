@@ -4,6 +4,7 @@ public record ProxyConfig(
         String listenHost,
         int listenPort,
         long defaultDeadlineMillis,
+        long requestContextTtlMillis,
         boolean detectInboundDeadline,
         boolean gatewaySidecar
 ) {
@@ -12,6 +13,7 @@ public record ProxyConfig(
                 env("PROXY_LISTEN_HOST", "0.0.0.0"),
                 intEnv("PROXY_LISTEN_PORT", 8080),
                 longEnv("DEFAULT_DEADLINE_MILLIS", 5000),
+                positiveLongEnv("REQUEST_CONTEXT_TTL_MILLIS", 20000),
                 Boolean.parseBoolean(env("PROXY_DETECT_INBOUND_DEADLINE", "true")),
                 "gateway".equalsIgnoreCase(env("PROXY_ROLE", "service"))
         );
@@ -32,5 +34,13 @@ public record ProxyConfig(
         String value = System.getenv(key);
         if (value == null || value.isBlank()) return defaultValue;
         return Long.parseLong(value);
+    }
+
+    private static long positiveLongEnv(String key, long defaultValue) {
+        long value = longEnv(key, defaultValue);
+        if (value <= 0) {
+            throw new IllegalArgumentException(key + " must be greater than 0");
+        }
+        return value;
     }
 }
