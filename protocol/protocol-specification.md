@@ -6,7 +6,7 @@ The context allows participating services to exchange information about request 
 
 This specification defines how that information is represented,validated and updated across service calls.
 
-# Scope
+## Scope
 
 - Context fields, their meanings and allowed values.
 - Validation and context-transition rules.
@@ -50,3 +50,22 @@ Interceptors read, propagate and update the context according to the protocol ru
 
 Application code identifies where cancellation can safely be honoured, especially during operations with side effects.
 Receiving a cancellation signal does not mean an operation has stopped, and does not imply that completed changes were rolled back.
+
+### Deadline propagation
+
+1. Once a valid request context has been established, a downstream call MUST NOT renew the inherited time allowance.
+
+2. A participant MAY apply a shorter local or child-call limit. A shorter limit MUST NOT extend the inherited deadline or renew the parent request's allowance.
+
+3. The selected time representation MUST specify its units, bounds, expiry comparison and clock assumptions. Absolute timestamps and remaining durations MUST NOT be interpreted interchangeably.
+
+4. Time spent processing, queueing, waiting and performing retry backoff MUST consume the applicable time allowance.
+
+### Cancellation ownership and handling
+
+1. A caller MAY request cancellation of an operation. Deadline expiry MAY also trigger a cancellation request automatically.
+
+2. A cancellation request MUST be treated as a signal that the caller no longer wants the operation to continue. It MUST NOT be treated as proof that processing has stopped, that no side effects occurred, or that previous changes were rolled back.
+
+3. The RRPE implementation MUST make a received cancellation request available to application code. The service developer is responsible for defining and implementing safe cancellation checkpoints.
+
