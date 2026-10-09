@@ -31,11 +31,25 @@ public final class ProxyServer {
                     .childHandler(new ProxyInitializer(config));
 
             Channel channel = bootstrap.bind(config.listenHost(), config.listenPort()).sync().channel();
+            Channel metricsChannel = new ServerBootstrap()
+                    .group(boss, workers)
+                    .channel(EpollServerSocketChannel.class)
+                    .childOption(ChannelOption.SO_KEEPALIVE, true)
+                    .childHandler(new MetricsEndpointInitializer())
+                    .bind(config.metricsListenHost(), config.metricsListenPort())
+                    .sync()
+                    .channel();
 
             System.out.printf("TPROXY sidecar listening on %s:%d; forwarding to each connection's original destination%n",
                     config.listenHost(), config.listenPort());
+            System.out.printf("Metrics endpoint listening on http://%s:%d/metrics%n",
+                    config.metricsListenHost(), config.metricsListenPort());
 
-            channel.closeFuture().sync();
+            try {
+                channel.closeFuture().sync();
+            } finally {
+                metricsChannel.close().syncUninterruptibly();
+            }
         } finally {
             boss.shutdownGracefully();
             workers.shutdownGracefully();

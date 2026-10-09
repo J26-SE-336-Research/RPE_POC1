@@ -16,7 +16,7 @@ spec:
     spec:
       initContainers:
         - name: configure-proxy-routing
-          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v7
+          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v8
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-ec"]
           args:
@@ -74,11 +74,13 @@ spec:
                   name: rpe-config
                   key: NOTIFICATION_SERVICE_URL
         - name: netty-proxy
-          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v7
+          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v8
           imagePullPolicy: IfNotPresent
           ports:
             - name: proxy
               containerPort: 15001
+            - name: metrics
+              containerPort: 9090
           env:
             - name: PROXY_ROLE
               value: gateway

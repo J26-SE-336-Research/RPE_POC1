@@ -14,6 +14,6 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build /workspace/target/netty-sidecar-proxy-1.0.0.jar app.jar
 
-EXPOSE 8080
+EXPOSE 8080 9090
 
 ENTRYPOINT ["java", "-jar", "app.jar"]

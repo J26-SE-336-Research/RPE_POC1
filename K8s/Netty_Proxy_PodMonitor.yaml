@@ -1,0 +1,25 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: netty-proxies
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - default
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - apigateway
+          - order
+          - inventory
+          - payment
+          - notification
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
