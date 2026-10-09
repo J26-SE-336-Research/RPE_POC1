@@ -7,7 +7,16 @@ RUN mvn --batch-mode package -DskipTests
 
 # ---- run stage ----
 FROM eclipse-temurin:17-jre
+
+RUN groupadd --gid 1337 sidecar \
+    && useradd --uid 1337 --gid 1337 --no-create-home --shell /usr/sbin/nologin sidecar
+
 WORKDIR /app
+
 COPY --from=build /workspace/target/netty-sidecar-proxy-1.0.0.jar app.jar
-EXPOSE 8080
+
+EXPOSE 15001
+
+USER 1337:1337
+
 ENTRYPOINT ["java", "-jar", "app.jar"]

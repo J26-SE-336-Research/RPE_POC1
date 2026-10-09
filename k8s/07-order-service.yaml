@@ -42,6 +42,7 @@ spec:
           securityContext:
             runAsUser: 0
             runAsGroup: 0
+            allowPrivilegeEscalation: true
             capabilities:
               add:
                 - NET_ADMIN
@@ -148,7 +149,7 @@ spec:
               # Its own backend connections must NOT return to TPROXY.
               iptables -t mangle -A RRPE_TPROXY_OUT \
                 -m owner \
-                --uid-owner 0 \
+                --uid-owner 1337 \
                 -j RETURN
 
               # Loopback traffic
@@ -296,12 +297,9 @@ spec:
           imagePullPolicy: Never
 
           securityContext:
-            runAsUser: 0
-            runAsGroup: 0
-            allowPrivilegeEscalation: true
-            capabilities:
-              add:
-                - NET_ADMIN
+            runAsUser: 1337
+            runAsGroup: 1337
+            allowPrivilegeEscalation: false
 
           env:
             - name: PROXY_LISTEN_HOST
