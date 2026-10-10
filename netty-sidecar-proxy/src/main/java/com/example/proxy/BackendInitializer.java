@@ -11,14 +11,19 @@ public final class BackendInitializer extends ChannelInitializer<SocketChannel> 
     private final long deadline;
     private final boolean detectInboundDeadline;
     private final boolean ownsContext;
+    private final ProxyMetrics.InboundRequestTracker inboundTracker;
+    private final long requestStartNanos;
 
     public BackendInitializer(Channel clientChannel, String requestId, long deadline,
-                              boolean detectInboundDeadline, boolean ownsContext) {
+                              boolean detectInboundDeadline, boolean ownsContext,
+                              ProxyMetrics.InboundRequestTracker inboundTracker, long requestStartNanos) {
         this.clientChannel = clientChannel;
         this.requestId = requestId;
         this.deadline = deadline;
         this.detectInboundDeadline = detectInboundDeadline;
         this.ownsContext = ownsContext;
+        this.inboundTracker = inboundTracker;
+        this.requestStartNanos = requestStartNanos;
     }
 
     @Override
@@ -27,6 +32,7 @@ public final class BackendInitializer extends ChannelInitializer<SocketChannel> 
                 .addLast("httpClientCodec", new HttpClientCodec())
                 .addLast("aggregator", new HttpObjectAggregator(10 * 1024 * 1024))
                 .addLast("backendResponseHandler", new BackendResponseHandler(
-                        clientChannel, requestId, deadline, detectInboundDeadline, ownsContext));
+                        clientChannel, requestId, deadline, detectInboundDeadline, ownsContext,
+                        inboundTracker, requestStartNanos));
     }
 }

@@ -24,7 +24,8 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
     private static final String EXCEEDED = "deadlineExceded";
     private static final String CANCELLATION = "cancellation_Triggered";
     private static final String REQUEST_ID = "Request_id";
-    private record ContextEntry(HttpHeaders headers, Object generation) {}
+    private record ContextEntry(HttpHeaders headers, Object generation, boolean inboundRequest,
+                                boolean deadlineMetricRecorded, boolean cancellationMetricRecorded) {}
 
     private static final ConcurrentHashMap<String, ContextEntry> REQUEST_CONTEXTS = new ConcurrentHashMap<>();
     private static final ScheduledExecutorService CONTEXT_EXPIRY_EXECUTOR = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -52,6 +53,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
             if (entry.generation() != generation) return entry;
             HttpHeaders existing = entry.headers();
             boolean alreadyExceeded = Boolean.parseBoolean(existing.get(EXCEEDED));
+            boolean alreadyCancelled = Boolean.parseBoolean(existing.get(CANCELLATION));
             HttpHeaders updated = existing.copy();
             updated.set(EXCEEDED, "true");
             updated.set(CANCELLATION, "true");
@@ -59,7 +61,18 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                 LOGGER.info(() -> "Deadline exceeded for Request_id=" + requestId
                         + "; cancellation_Triggered=true");
             }
-            return new ContextEntry(updated, entry.generation());
+            boolean deadlineMetricRecorded = entry.deadlineMetricRecorded();
+            boolean cancellationMetricRecorded = entry.cancellationMetricRecorded();
+            if (entry.inboundRequest() && !deadlineMetricRecorded) {
+                ProxyMetrics.recordInboundDeadlineExceeded();
+                deadlineMetricRecorded = true;
+            }
+            if (entry.inboundRequest() && !alreadyCancelled && !cancellationMetricRecorded) {
+                ProxyMetrics.recordInboundCancellation();
+                cancellationMetricRecorded = true;
+            }
+            return new ContextEntry(updated, entry.generation(), entry.inboundRequest(),
+                    deadlineMetricRecorded, cancellationMetricRecorded);
         });
     }
 
@@ -69,10 +82,22 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
             HttpHeaders updated = existing.copy();
             boolean alreadyExceeded = Boolean.parseBoolean(existing.get(EXCEEDED));
             boolean alreadyCancelled = Boolean.parseBoolean(existing.get(CANCELLATION));
-            updated.set(EXCEEDED, Boolean.toString(alreadyExceeded || deadlineExceeded));
-            updated.set(CANCELLATION, Boolean.toString(alreadyCancelled || cancellationTriggered
-                    || deadlineExceeded));
-            return new ContextEntry(updated, entry.generation());
+            boolean nowExceeded = alreadyExceeded || deadlineExceeded;
+            boolean nowCancelled = alreadyCancelled || cancellationTriggered || deadlineExceeded;
+            updated.set(EXCEEDED, Boolean.toString(nowExceeded));
+            updated.set(CANCELLATION, Boolean.toString(nowCancelled));
+            boolean deadlineMetricRecorded = entry.deadlineMetricRecorded();
+            boolean cancellationMetricRecorded = entry.cancellationMetricRecorded();
+            if (entry.inboundRequest() && nowExceeded && !deadlineMetricRecorded) {
+                ProxyMetrics.recordInboundDeadlineExceeded();
+                deadlineMetricRecorded = true;
+            }
+            if (entry.inboundRequest() && nowCancelled && !cancellationMetricRecorded) {
+                ProxyMetrics.recordInboundCancellation();
+                cancellationMetricRecorded = true;
+            }
+            return new ContextEntry(updated, entry.generation(), entry.inboundRequest(),
+                    deadlineMetricRecorded, cancellationMetricRecorded);
         });
     }
 
@@ -80,26 +105,28 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         this.config = config;
     }
 
-    private static void rejectMissingContext(ChannelHandlerContext ctx, FullHttpRequest request, String missing) {
+    private static void rejectMissingContext(ChannelHandlerContext ctx, FullHttpRequest request,
+                                             String missing,
+                                             ProxyMetrics.InboundRequestTracker inboundTracker) {
         LOGGER.warning(() -> "Rejecting " + request.method() + " " + requestPath(request.uri())
                 + " from " + ctx.channel().remoteAddress() + ": missing " + missing);
         sendError(ctx, HttpResponseStatus.BAD_REQUEST,
-                "Missing required propagation header or context: " + missing);
+                "Missing required propagation header or context: " + missing, inboundTracker);
     }
 
     @Override
     protected void channelRead0(ChannelHandlerContext clientCtx, FullHttpRequest request) {
+        long requestStartNanos = System.nanoTime();
         if (!(clientCtx.channel().localAddress() instanceof InetSocketAddress localAddress)
                 || localAddress.isUnresolved()) {
             sendError(clientCtx, HttpResponseStatus.BAD_GATEWAY,
-                    "Could not determine intercepted connection destination");
+                    "Could not determine intercepted connection destination", null);
             return;
         }
 
         boolean outboundRedirect = localAddress.getPort() == config.listenPort();
-        if (!outboundRedirect) {
-            ProxyMetrics.recordInboundRequest();
-        }
+        ProxyMetrics.InboundRequestTracker inboundTracker = outboundRedirect
+                ? null : ProxyMetrics.beginInboundRequest();
         InetSocketAddress destination;
         InetSocketAddress originalDestination = localAddress;
         String uri = request.uri();
@@ -109,7 +136,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                 destination = target.address();
                 uri = target.requestUri();
             } catch (IllegalArgumentException invalidTarget) {
-                sendError(clientCtx, HttpResponseStatus.BAD_REQUEST, invalidTarget.getMessage());
+                sendError(clientCtx, HttpResponseStatus.BAD_REQUEST, invalidTarget.getMessage(), null);
                 return;
             }
         } else {
@@ -132,7 +159,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
             suppliedRequestId = false;
         }
         if (!suppliedRequestId && !gatewaySidecar) {
-            rejectMissingContext(clientCtx, request, REQUEST_ID);
+            rejectMissingContext(clientCtx, request, REQUEST_ID, inboundTracker);
             return;
         }
         if (!suppliedRequestId) requestId = UUID.randomUUID().toString();
@@ -156,7 +183,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         // Outbound service calls carry only Request_id. Their sidecar must find
         // the full chain context saved from that service's inbound request.
         if (requestIdOnly && storedContext == null && !gatewaySidecar) {
-            rejectMissingContext(clientCtx, request, "stored context for " + REQUEST_ID);
+            rejectMissingContext(clientCtx, request, "stored context for " + REQUEST_ID, inboundTracker);
             return;
         }
 
@@ -166,14 +193,15 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
             deadlineValue = Long.toString(System.currentTimeMillis() + config.defaultDeadlineMillis());
         }
         if (deadlineValue == null || deadlineValue.isBlank()) {
-            rejectMissingContext(clientCtx, request, DEADLINE);
+            rejectMissingContext(clientCtx, request, DEADLINE, inboundTracker);
             return;
         }
         long deadline;
         try {
             deadline = Long.parseLong(deadlineValue);
         } catch (NumberFormatException invalidDeadline) {
-            sendError(clientCtx, HttpResponseStatus.BAD_REQUEST, "Invalid " + DEADLINE + " header");
+            sendError(clientCtx, HttpResponseStatus.BAD_REQUEST, "Invalid " + DEADLINE + " header",
+                    inboundTracker);
             return;
         }
 
@@ -182,7 +210,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                 || (!gatewayInbound && Boolean.parseBoolean(request.headers().get(EXCEEDED)));
         if (!requestIdOnly && !gatewaySidecar
                 && (!request.headers().contains(EXCEEDED) || !request.headers().contains(CANCELLATION))) {
-            rejectMissingContext(clientCtx, request, "deadline and cancellation flags");
+            rejectMissingContext(clientCtx, request, "deadline and cancellation flags", inboundTracker);
             return;
         }
         HttpHeaders contextHeaders = new DefaultHttpHeaders();
@@ -203,9 +231,13 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         boolean ownsContext = false;
         Object contextGeneration = null;
         if (storedContext == null) {
-            ContextEntry candidate = new ContextEntry(contextHeaders.copy(), new Object());
+            boolean inboundRequest = !outboundRedirect;
+            ContextEntry candidate = new ContextEntry(contextHeaders.copy(), new Object(), inboundRequest,
+                    inboundRequest && expired, inboundRequest && cancellation);
             ContextEntry existing = REQUEST_CONTEXTS.putIfAbsent(requestId, candidate);
             if (existing == null) {
+                if (candidate.deadlineMetricRecorded()) ProxyMetrics.recordInboundDeadlineExceeded();
+                if (candidate.cancellationMetricRecorded()) ProxyMetrics.recordInboundCancellation();
                 ownsContext = true;
                 contextGeneration = candidate.generation();
                 CONTEXT_EXPIRY_EXECUTOR.schedule(
@@ -253,7 +285,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         backendBootstrap.group(clientCtx.channel().eventLoop())
                 .channel(clientCtx.channel().getClass())
                 .handler(new BackendInitializer(clientCtx.channel(), activeRequestId, activeDeadline,
-                        detectThisRequestDeadline, ownsContext))
+                        detectThisRequestDeadline, ownsContext, inboundTracker, requestStartNanos))
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
 
         LOGGER.info(() -> "Connecting to backend requestId=" + activeRequestId
@@ -264,7 +296,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                         LOGGER.log(Level.SEVERE, "Backend connect failed requestId=" + activeRequestId
                                 + " destination=" + destination, future.cause());
                         sendError(clientCtx, HttpResponseStatus.BAD_GATEWAY,
-                                "Could not connect to backend: " + future.cause().getMessage());
+                                "Could not connect to backend: " + future.cause().getMessage(), inboundTracker);
                         return;
                     }
 
@@ -283,7 +315,7 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
                                     + activeRequestId + " destination=" + destination, writeFuture.cause());
                             backendChannel.close();
                             sendError(clientCtx, HttpResponseStatus.BAD_GATEWAY,
-                                    "Could not send request to backend");
+                                    "Could not send request to backend", inboundTracker);
                         } else {
                             LOGGER.info(() -> "Backend request write succeeded requestId="
                                     + activeRequestId + " destination=" + destination);
@@ -359,8 +391,16 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
 
     private record OutboundTarget(InetSocketAddress address, String requestUri) {}
 
-    private static void sendError(ChannelHandlerContext ctx, HttpResponseStatus status, String message) {
-        if (!ctx.channel().isActive()) return;
+    private static void sendError(ChannelHandlerContext ctx, HttpResponseStatus status,
+                                  String message, ProxyMetrics.InboundRequestTracker inboundTracker) {
+        if (!ctx.channel().isActive()) {
+            if (inboundTracker != null) inboundTracker.finish();
+            return;
+        }
+
+        if (inboundTracker != null) {
+            ProxyMetrics.recordInboundFailure(status.code());
+        }
 
         LOGGER.warning(() -> "Sending proxy error status=" + status.code()
                 + " client=" + ctx.channel().remoteAddress() + " reason=" + message);
@@ -374,6 +414,12 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, response.content().readableBytes());
         response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 
-        ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+        ctx.writeAndFlush(response).addListener(writeFuture -> {
+            if (writeFuture.isSuccess() && inboundTracker != null) {
+                ProxyMetrics.recordInboundSuccessfulRequest(status.code());
+            }
+            if (inboundTracker != null) inboundTracker.finish();
+            ctx.close();
+        });
     }
 }
