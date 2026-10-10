@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: 2002rusira/frontend-rpe-implementation:v1
+          image: 2002rusira/frontend-rpe-implementation:v3
           ports:
             - containerPort: 80
           env:

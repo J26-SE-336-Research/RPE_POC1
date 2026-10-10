@@ -5,7 +5,6 @@ import axios from 'axios';
 const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
-  timeout: 12000,
 });
 
 export const getProducts = () => api.get('/inventory/products').then((r) => r.data);

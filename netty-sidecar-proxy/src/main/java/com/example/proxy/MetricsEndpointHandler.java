@@ -9,11 +9,7 @@ import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
-import io.netty.util.CharsetUtil;
-
 public final class MetricsEndpointHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
-    private static final byte[] EMPTY_METRICS = "# No metrics registered\n".getBytes(CharsetUtil.UTF_8);
-
     @Override
     protected void channelRead0(ChannelHandlerContext context, FullHttpRequest request) {
         HttpResponseStatus status;
@@ -27,14 +23,15 @@ public final class MetricsEndpointHandler extends SimpleChannelInboundHandler<Fu
             body = new byte[0];
         } else {
             status = HttpResponseStatus.OK;
-            body = EMPTY_METRICS;
+            body = ProxyMetrics.prometheusText();
         }
 
         DefaultFullHttpResponse response = new DefaultFullHttpResponse(
                 HttpVersion.HTTP_1_1,
                 status,
                 Unpooled.wrappedBuffer(body));
-        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8");
+        response.headers().set(HttpHeaderNames.CONTENT_TYPE,
+                "text/plain; version=0.0.4; charset=utf-8");
         response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, body.length);
 
         boolean keepAlive = io.netty.handler.codec.http.HttpUtil.isKeepAlive(request);

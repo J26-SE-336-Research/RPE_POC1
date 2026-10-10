@@ -7,10 +7,9 @@ import org.springframework.web.client.RestTemplate;
 import java.math.BigDecimal;
 
 // Thin wrapper around calls to inventory-service. Kept deliberately
-// dumb — no retry, no circuit breaker, no timeout tuning beyond the
-// shared RestTemplate default — because that resilience behaviour is
-// what the interceptor layer is meant to add from outside this code,
-// not something order-service should implement for itself.
+// simple — no retry, circuit breaker, or per-call timeout policy —
+// because request deadline and cancellation behavior is handled by
+// the proxy layer rather than order-service client code.
 @Component
 public class InventoryClient {
 

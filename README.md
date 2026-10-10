@@ -187,9 +187,9 @@ environment variables rather than hardcoded in `application.yml` —
 
 - **No service discovery** (Eureka, Consul) — fixed URLs via env vars
   instead, on purpose (see "Why this shape" above).
-- **No retry, circuit breaker, or timeout tuning inside the
-  services.** `order-service` uses a single fixed connect/read
-  timeout and nothing else. That gap is deliberate.
+- **No retry, circuit breaker, or explicit client timeout inside the
+  services.** Request deadline and cancellation behavior is handled
+  by the proxy layer.
 - **No authentication.** Out of scope for this proof-of-concept.
 
 ## Stopping and resetting

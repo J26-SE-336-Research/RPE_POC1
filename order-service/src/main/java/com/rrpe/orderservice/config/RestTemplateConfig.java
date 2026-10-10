@@ -5,21 +5,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestTemplate;
 
-import java.time.Duration;
-
 @Configuration
 public class RestTemplateConfig {
 
-    // Fixed, generous timeouts for now. This is intentionally naive —
-    // a real deployment of this proof-of-concept replaces a flat
-    // per-call timeout with a remaining-deadline budget passed hop to
-    // hop, which is exactly the gap an interceptor layer is meant to
-    // fill without order-service's own code needing to change.
+    // No explicit connect or read timeout is configured here. Request
+    // deadline and cancellation behavior is handled by the proxy layer.
     @Bean
     public RestTemplate restTemplate(RestTemplateBuilder builder) {
         return builder
-                .setConnectTimeout(Duration.ofSeconds(3))
-                .setReadTimeout(Duration.ofSeconds(5))
                 .additionalInterceptors((request, body, execution) -> {
                     String requestId = RequestPropagationContext.currentRequestId();
                     if (requestId != null) request.getHeaders().set("Request_id", requestId);

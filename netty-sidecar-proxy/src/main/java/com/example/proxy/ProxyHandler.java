@@ -97,6 +97,9 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         }
 
         boolean outboundRedirect = localAddress.getPort() == config.listenPort();
+        if (!outboundRedirect) {
+            ProxyMetrics.recordInboundRequest();
+        }
         InetSocketAddress destination;
         InetSocketAddress originalDestination = localAddress;
         String uri = request.uri();
