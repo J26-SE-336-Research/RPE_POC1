@@ -5,6 +5,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.List;
 
 /** Metrics maintained by the sidecar proxy and exposed to Prometheus. */
 public final class ProxyMetrics {
@@ -21,6 +22,7 @@ public final class ProxyMetrics {
             new AtomicLongArray(INBOUND_LATENCY_BUCKETS_SECONDS.length);
     private static final LongAdder INBOUND_LATENCY_COUNT = new LongAdder();
     private static final LongAdder INBOUND_LATENCY_SUM_NANOS = new LongAdder();
+    private static volatile List<GatewayDeadlineRules.DeadlineBudget> GATEWAY_DEADLINE_BUDGETS = List.of();
 
     private ProxyMetrics() {}
 
@@ -68,6 +70,10 @@ public final class ProxyMetrics {
         INBOUND_CANCELLATION_REQUESTS.increment();
     }
 
+    public static void configureGatewayDeadlineBudgets(List<GatewayDeadlineRules.DeadlineBudget> budgets) {
+        GATEWAY_DEADLINE_BUDGETS = List.copyOf(budgets);
+    }
+
     public static void recordInboundRequestDuration(long durationNanos) {
         long nonNegativeDurationNanos = Math.max(0, durationNanos);
         double durationSeconds = nonNegativeDurationNanos / 1_000_000_000.0;
@@ -99,10 +105,31 @@ public final class ProxyMetrics {
                 + "# HELP sidecar_cancellation_requests_total Total inbound request chains marked for cancellation.\n"
                 + "# TYPE sidecar_cancellation_requests_total counter\n"
                 + "sidecar_cancellation_requests_total " + INBOUND_CANCELLATION_REQUESTS.sum() + "\n"
+                + "# HELP sidecar_gateway_deadline_budget_milliseconds Configured deadline budget in milliseconds for each explicitly configured gateway method and route.\n"
+                + "# TYPE sidecar_gateway_deadline_budget_milliseconds gauge\n"
+                + gatewayDeadlineBudgetText()
                 + "# HELP sidecar_inbound_request_duration_seconds Time from inbound interception until the backend response is received.\n"
                 + "# TYPE sidecar_inbound_request_duration_seconds histogram\n"
                 + inboundDurationHistogramText();
         return exposition.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static String gatewayDeadlineBudgetText() {
+        StringBuilder exposition = new StringBuilder();
+        for (GatewayDeadlineRules.DeadlineBudget budget : GATEWAY_DEADLINE_BUDGETS) {
+            exposition.append("sidecar_gateway_deadline_budget_milliseconds{method=\"")
+                    .append(escapeLabel(budget.method()))
+                    .append("\",route=\"")
+                    .append(escapeLabel(budget.route()))
+                    .append("\"} ")
+                    .append(budget.deadlineMillis())
+                    .append('\n');
+        }
+        return exposition.toString();
+    }
+
+    private static String escapeLabel(String value) {
+        return value.replace("\\", "\\\\").replace("\n", "\\n").replace("\"", "\\\"");
     }
 
     private static String inboundDurationHistogramText() {

@@ -14,6 +14,10 @@ public final class ProxyServer {
 
     public static void main(String[] args) throws Exception {
         ProxyConfig config = ProxyConfig.fromEnvironment();
+        if (config.gatewaySidecar()) {
+            ProxyMetrics.configureGatewayDeadlineBudgets(
+                    config.gatewayDeadlineRules().metricBudgets());
+        }
 
         if (!Epoll.isAvailable()) {
             throw new IllegalStateException("This TPROXY sidecar requires Netty native epoll on Linux",

@@ -7,6 +7,7 @@ import java.util.Locale;
 
 /** Route-specific deadline budgets for new requests entering the API gateway. */
 public final class GatewayDeadlineRules {
+    public record DeadlineBudget(String method, String route, long deadlineMillis) {}
     private record Rule(String method, String path, long deadlineMillis, int literalSegments) {}
 
     private final List<Rule> rules;
@@ -66,6 +67,15 @@ public final class GatewayDeadlineRules {
             if (matches(rule.path(), path)) return rule.deadlineMillis();
         }
         return defaultMillis;
+    }
+
+    /** Configured route budgets for bounded-cardinality Prometheus labels. */
+    public List<DeadlineBudget> metricBudgets() {
+        List<DeadlineBudget> budgets = new ArrayList<>();
+        for (Rule rule : rules) {
+            budgets.add(new DeadlineBudget(rule.method(), rule.path(), rule.deadlineMillis()));
+        }
+        return List.copyOf(budgets);
     }
 
     private static boolean matches(String pattern, String path) {

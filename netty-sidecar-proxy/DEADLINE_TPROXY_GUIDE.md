@@ -24,6 +24,8 @@ Header names are kept as used by this project. HTTP header names are case-insens
 
 The gateway sidecar uses `GATEWAY_DEADLINE_RULES` to choose a duration by HTTP method and path, and falls back to `DEFAULT_DEADLINE_MILLIS` when no rule matches. For example, `GET /api/inventory=500;POST /api/orders=5000` sets 500 ms for inventory reads and 5,000 ms for order creates. Rules are separated by semicolons; each is `METHOD /path=milliseconds`. Query strings are ignored, trailing slashes are normalized, and `{name}` in a path matches one non-empty segment. The sidecar adds the selected duration to the current time once to create the chain's absolute deadline; downstream hops keep that value unchanged.
 
+The gateway sidecar exports only explicitly configured route budgets on `/metrics` using `sidecar_gateway_deadline_budget_milliseconds{method="GET",route="/api/orders"} 2000`. Labels use configured route templates, not query values or concrete resource IDs. Unmatched routes use the default request budget but are not listed in this metric.
+
 ## One request, step by step
 
 Imagine a client calls the API gateway, which calls Order, and Order calls Inventory.
