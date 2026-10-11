@@ -190,7 +190,10 @@ public final class ProxyHandler extends SimpleChannelInboundHandler<FullHttpRequ
         String deadlineValue = gatewayInbound ? null : request.headers().get(DEADLINE);
         if (requestIdOnly && storedContext != null) deadlineValue = storedContext.get(DEADLINE);
         if ((deadlineValue == null || deadlineValue.isBlank()) && gatewaySidecar) {
-            deadlineValue = Long.toString(System.currentTimeMillis() + config.defaultDeadlineMillis());
+            long budgetMillis = gatewayInbound
+                    ? config.gatewayDeadlineRules().deadlineMillis(request.method().name(), uri, config.defaultDeadlineMillis())
+                    : config.defaultDeadlineMillis();
+            deadlineValue = Long.toString(System.currentTimeMillis() + budgetMillis);
         }
         if (deadlineValue == null || deadlineValue.isBlank()) {
             rejectMissingContext(clientCtx, request, DEADLINE, inboundTracker);

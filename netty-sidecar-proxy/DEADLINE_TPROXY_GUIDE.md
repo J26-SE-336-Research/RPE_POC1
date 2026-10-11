@@ -22,7 +22,7 @@ Header names are kept as used by this project. HTTP header names are case-insens
 | `deadlineExceded` | `false` | Becomes `true` after a sidecar detects that the deadline has passed. The header spelling is intentionally the current code spelling. |
 | `cancellation_Triggered` | `false` | A signal that work should be cancelled or skipped where the application can do so. |
 
-The gateway sidecar uses `DEFAULT_DEADLINE_MILLIS` to choose how far in the future to set a missing deadline. For example, a 5,000 millisecond setting means five seconds from the gateway's current system time. The resulting absolute deadline is then passed unchanged along the chain.
+The gateway sidecar uses `GATEWAY_DEADLINE_RULES` to choose a duration by HTTP method and path, and falls back to `DEFAULT_DEADLINE_MILLIS` when no rule matches. For example, `GET /api/inventory=500;POST /api/orders=5000` sets 500 ms for inventory reads and 5,000 ms for order creates. Rules are separated by semicolons; each is `METHOD /path=milliseconds`. Query strings are ignored, trailing slashes are normalized, and `{name}` in a path matches one non-empty segment. The sidecar adds the selected duration to the current time once to create the chain's absolute deadline; downstream hops keep that value unchanged.
 
 ## One request, step by step
 

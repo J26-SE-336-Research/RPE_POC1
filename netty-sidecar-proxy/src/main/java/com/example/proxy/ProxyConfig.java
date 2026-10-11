@@ -8,7 +8,8 @@ public record ProxyConfig(
         long defaultDeadlineMillis,
         long requestContextTtlMillis,
         boolean detectInboundDeadline,
-        boolean gatewaySidecar
+        boolean gatewaySidecar,
+        GatewayDeadlineRules gatewayDeadlineRules
 ) {
     public static ProxyConfig fromEnvironment() {
         return new ProxyConfig(
@@ -19,7 +20,8 @@ public record ProxyConfig(
                 longEnv("DEFAULT_DEADLINE_MILLIS", 5000),
                 positiveLongEnv("REQUEST_CONTEXT_TTL_MILLIS", 20000),
                 Boolean.parseBoolean(env("PROXY_DETECT_INBOUND_DEADLINE", "true")),
-                "gateway".equalsIgnoreCase(env("PROXY_ROLE", "service"))
+                "gateway".equalsIgnoreCase(env("PROXY_ROLE", "service")),
+                GatewayDeadlineRules.parse(env("GATEWAY_DEADLINE_RULES", ""))
         );
     }
 

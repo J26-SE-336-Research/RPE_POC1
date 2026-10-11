@@ -10,5 +10,6 @@ data:
   PAYMENT_SERVICE_URL: http://payment-service:8083
   SPRING_DATASOURCE_URL_Order: jdbc:postgresql://postgres-service:5432/orderdb
   ORDER_SERVICE_URL: http://order-service:8081
+  GATEWAY_DEADLINE_RULES: "GET /api/inventory/products=1000;GET /api/orders=2000;POST /api/orders=5000;GET /api/payments/order/{orderId}=1500;GET /api/notifications=1000"
   API_GATEWAY_HOST: api-gateway-service
   API_GATEWAY_PORT: "8080"

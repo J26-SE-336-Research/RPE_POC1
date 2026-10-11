@@ -90,6 +90,11 @@ spec:
               value: "15001"
             - name: DEFAULT_DEADLINE_MILLIS
               value: "1000"
+            - name: GATEWAY_DEADLINE_RULES
+              valueFrom:
+                configMapKeyRef:
+                  name: rpe-config
+                  key: GATEWAY_DEADLINE_RULES
             - name: REQUEST_CONTEXT_TTL_MILLIS
               value: "20000"
           securityContext:
