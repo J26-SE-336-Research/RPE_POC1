@@ -26,6 +26,8 @@ The gateway sidecar uses `GATEWAY_DEADLINE_RULES` to choose a duration by HTTP m
 
 The gateway sidecar exports only explicitly configured route budgets on `/metrics` using `sidecar_gateway_deadline_budget_milliseconds{method="GET",route="/api/orders"} 2000`. Labels use configured route templates, not query values or concrete resource IDs. Unmatched routes use the default request budget but are not listed in this metric.
 
+Every sidecar also exports route-and-service request counts, deadline detections, and cancellations. The service latency histogram is grouped by service only, not by route. The gateway additionally exposes `sidecar_gateway_request_chain_duration_seconds`, a route-grouped histogram of time from gateway-sidecar ingress until the API gateway response returns. When `OTEL_EXPORTER_OTLP_ENDPOINT` points to an OpenTelemetry Collector, sidecars export spans with the shared request ID, chain route, budget, service name, response status, and deadline events. The gateway span begins the trace; each downstream proxy hop continues it using W3C `traceparent`. Prometheus stores aggregate metrics, while the trace backend stores the per-request path. Kubernetes obtains each `SERVICE_NAME` from the Pod's `app` label.
+
 ## One request, step by step
 
 Imagine a client calls the API gateway, which calls Order, and Order calls Inventory.

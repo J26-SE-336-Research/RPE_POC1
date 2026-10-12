@@ -8,7 +8,7 @@ class ProxyConfigTest {
     @Test
     void recordStoresConfiguration() {
         ProxyConfig config = new ProxyConfig("0.0.0.0", 8080, "0.0.0.0", 9090, 5000, 20000, true, false,
-                GatewayDeadlineRules.parse(""));
+                GatewayDeadlineRules.parse(""), "test-service", "");
 
         assertEquals("0.0.0.0", config.listenHost());
         assertEquals(8080, config.listenPort());

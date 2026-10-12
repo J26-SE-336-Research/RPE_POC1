@@ -14,6 +14,7 @@ public final class ProxyServer {
 
     public static void main(String[] args) throws Exception {
         ProxyConfig config = ProxyConfig.fromEnvironment();
+        ProxyTelemetry.initialize(config.serviceName(), config.otelExporterOtlpEndpoint());
         if (config.gatewaySidecar()) {
             ProxyMetrics.configureGatewayDeadlineBudgets(
                     config.gatewayDeadlineRules().metricBudgets());
@@ -55,6 +56,7 @@ public final class ProxyServer {
                 metricsChannel.close().syncUninterruptibly();
             }
         } finally {
+            ProxyTelemetry.shutdown();
             boss.shutdownGracefully();
             workers.shutdownGracefully();
         }

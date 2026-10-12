@@ -4,6 +4,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.opentelemetry.api.trace.Span;
 
 public final class BackendInitializer extends ChannelInitializer<SocketChannel> {
     private final Channel clientChannel;
@@ -11,17 +12,22 @@ public final class BackendInitializer extends ChannelInitializer<SocketChannel> 
     private final long deadline;
     private final boolean detectInboundDeadline;
     private final boolean ownsContext;
+    private final boolean gatewayChain;
+    private final Span requestSpan;
     private final ProxyMetrics.InboundRequestTracker inboundTracker;
     private final long requestStartNanos;
 
     public BackendInitializer(Channel clientChannel, String requestId, long deadline,
-                              boolean detectInboundDeadline, boolean ownsContext,
+                              boolean detectInboundDeadline, boolean ownsContext, boolean gatewayChain,
+                              Span requestSpan,
                               ProxyMetrics.InboundRequestTracker inboundTracker, long requestStartNanos) {
         this.clientChannel = clientChannel;
         this.requestId = requestId;
         this.deadline = deadline;
         this.detectInboundDeadline = detectInboundDeadline;
         this.ownsContext = ownsContext;
+        this.gatewayChain = gatewayChain;
+        this.requestSpan = requestSpan;
         this.inboundTracker = inboundTracker;
         this.requestStartNanos = requestStartNanos;
     }
@@ -33,6 +39,7 @@ public final class BackendInitializer extends ChannelInitializer<SocketChannel> 
                 .addLast("aggregator", new HttpObjectAggregator(10 * 1024 * 1024))
                 .addLast("backendResponseHandler", new BackendResponseHandler(
                         clientChannel, requestId, deadline, detectInboundDeadline, ownsContext,
+                        gatewayChain, requestSpan,
                         inboundTracker, requestStartNanos));
     }
 }

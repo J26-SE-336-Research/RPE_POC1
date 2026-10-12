@@ -9,7 +9,9 @@ public record ProxyConfig(
         long requestContextTtlMillis,
         boolean detectInboundDeadline,
         boolean gatewaySidecar,
-        GatewayDeadlineRules gatewayDeadlineRules
+        GatewayDeadlineRules gatewayDeadlineRules,
+        String serviceName,
+        String otelExporterOtlpEndpoint
 ) {
     public static ProxyConfig fromEnvironment() {
         return new ProxyConfig(
@@ -21,7 +23,9 @@ public record ProxyConfig(
                 positiveLongEnv("REQUEST_CONTEXT_TTL_MILLIS", 20000),
                 Boolean.parseBoolean(env("PROXY_DETECT_INBOUND_DEADLINE", "true")),
                 "gateway".equalsIgnoreCase(env("PROXY_ROLE", "service")),
-                GatewayDeadlineRules.parse(env("GATEWAY_DEADLINE_RULES", ""))
+                GatewayDeadlineRules.parse(env("GATEWAY_DEADLINE_RULES", "")),
+                env("SERVICE_NAME", "unknown-service"),
+                env("OTEL_EXPORTER_OTLP_ENDPOINT", "")
         );
     }
 

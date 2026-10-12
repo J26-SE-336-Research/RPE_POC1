@@ -131,12 +131,12 @@ For the Minikube Docker driver, build and load the image referenced by the manif
 
 ```bash
 docker build -f netty-sidecar-proxy/docker/Dockerfile \
-  -t 2002rusira/netty-sidecar-proxy-rpe-implementation:v2 \
+  -t 2002rusira/netty-sidecar-proxy-rpe-implementation:v13 \
   netty-sidecar-proxy
-minikube image load 2002rusira/netty-sidecar-proxy-rpe-implementation:v2
+minikube image load 2002rusira/netty-sidecar-proxy-rpe-implementation:v13
 ```
 
-Then apply the API gateway and backend service manifests. Their init containers install the pod-local routing rules before the application and proxy start.
+For a single-node Minikube development setup, apply `K8s/11-tempo.yaml` to install Tempo with local persistent storage and an OTLP/HTTP receiver at `tempo:4318`. Apply `K8s/10-otel-collector.yaml` to receive proxy spans over OTLP/HTTP on port `4318` and forward them over OTLP/HTTP to Tempo. Then apply the API gateway and backend service manifests. Their init containers install the pod-local routing rules before the application and proxy start.
 
 ## Project structure
 
@@ -173,9 +173,13 @@ The Netty sidecar beside the API gateway creates one chain identity and absolute
 | `cancellation_Triggered` | `true` when cancellation has been signalled |
 | `Request_id` | UUID identifying the request chain |
 
-Configure `DEFAULT_DEADLINE_MILLIS` on the gateway sidecar (default `5000`). It is the fallback budget for a new inbound route that has no matching rule. `GATEWAY_DEADLINE_RULES` optionally overrides that budget by HTTP method and path, with semicolon-separated entries such as `GET /api/inventory=500;POST /api/orders=5000;GET /api/orders/{id}=2000`. Values are milliseconds. Query strings are ignored, trailing slashes are normalized, and `{name}` matches one non-empty path segment. Unmatched routes use the default. The selected duration is converted to an absolute deadline once at gateway ingress; downstream hops must keep forwarding that deadline. `PROXY_DETECT_INBOUND_DEADLINE` controls deadline detection on a proxy instance (default `true`); set it to `false` on an instance that handles outbound hops so it forwards the inherited status without independently declaring an inbound deadline expired.
+Configure `DEFAULT_DEADLINE_MILLIS` on the gateway sidecar (default `5000`). It is the fallback budget for a new inbound route that has no matching rule. `GATEWAY_DEADLINE_RULES` optionally overrides that budget by HTTP method and path, with semicolon-separated entries such as `GET /api/inventory=500;POST /api/orders=5000;GET /api/orders/{id}=2000`. Values are milliseconds. Query strings are ignored, trailing slashes are normalized, and `{name}` matches one non-empty path segment. Unmatched routes use the default. The selected duration is converted to an absolute deadline once at gateway ingress; downstream hops must keep forwarding that deadline. Each sidecar detects expiry for the inbound request it owns, and outbound hops reuse the saved chain context so they carry the same absolute deadline and status.
 
 The gateway `/metrics` endpoint exposes only explicitly configured route budgets as `sidecar_gateway_deadline_budget_milliseconds{method="GET",route="/api/orders"} 2000`. These are gauges initialized from `GATEWAY_DEADLINE_RULES` at sidecar startup; Prometheus can scrape them to read each configured method/path budget. Unmatched routes use `DEFAULT_DEADLINE_MILLIS` for request handling but are not listed in this metric. The proxy does not export raw query values or concrete path IDs as labels.
+
+The proxy exports the service-only latency histogram `sidecar_service_request_duration_seconds`; it is not split by route. The gateway additionally exports `sidecar_gateway_request_chain_duration_seconds`, a gateway-only histogram labeled by service, method, configured chain route, and deadline budget. It measures the time from gateway-sidecar ingress until the API gateway's response returns, which includes downstream calls the gateway waits for. Request counts, deadline detections, cancellations, and gateway chain outcomes also use bounded service, method, route, and budget labels. Request IDs are deliberately excluded from Prometheus labels. Container CPU and memory still need to come from Kubernetes resource monitoring (for example, kubelet/cAdvisor metrics); the proxy reports request behavior, not application-container resource usage.
+
+When `OTEL_EXPORTER_OTLP_ENDPOINT` is set to the trace URL (for example, `http://otel-collector:4318/v1/traces`), each sidecar exports one OpenTelemetry span for each intercepted HTTP hop over OTLP/HTTP. A trace starts at the gateway, follows the W3C `traceparent` injected by the sidecars, and records the existing `Request_id`, configured chain route, deadline budget, service name, response status, and deadline-exceeded events. The same request ID therefore lets operators find the complete chain in the tracing backend. `SERVICE_NAME` should identify each sidecar; Kubernetes manifests read it from the Pod's `app` label. Apply [10-otel-collector.yaml](../K8s/10-otel-collector.yaml) to receive OTLP traces over HTTP port `4318` and forward them over HTTP to a Tempo service at `tempo:4318`. Tempo must have its OTLP/HTTP receiver enabled and be reachable at that address. Prometheus should scrape each sidecar's existing `/metrics` endpoint for aggregate route metrics. The intelligence layer can correlate route metrics with traces through the request ID; individual request IDs are not Prometheus labels because that would create unbounded time series.
 
 `REQUEST_CONTEXT_TTL_MILLIS` sets how long a sidecar keeps each request context after its first creation (default `20000`, or 20 seconds). The timer is fixed from context creation and is not reset by later requests with the same `Request_id`. Responses and connection failures do not remove contexts early; expiry removes them. Set the same value on every sidecar so all services use the same cleanup window. The TTL is a cleanup limit, separate from the request deadline.
 
@@ -185,7 +189,7 @@ The order service captures only `Request_id` for the lifetime of its synchronous
 
 Every service hop still needs to be routed through a proxy instance for proxy-side behavior to run. The proxy observes deadline expiry and propagates the resulting flags; it does not interrupt backend application work or send a separate asynchronous cancellation message to an already-running downstream request. Cancellation here is a propagated signal for application code to observe, consistent with this prototype's scope.
 
-## What this version does not yet implement
+## Current limitations
 
 This is a learning/reference implementation rather than a production transparent proxy.
 
@@ -197,14 +201,9 @@ The next engineering steps are:
 4. Backpressure and bounded buffering.
 5. Streaming bodies instead of aggregating every request/response.
 6. HTTPS/TLS interception where appropriate.
-7. Metrics and structured logging.
-8. Health/readiness endpoints.
-9. Kubernetes sidecar manifests.
-10. Linux iptables/TPROXY original-destination handling.
-11. Loop prevention when traffic is transparently redirected.
-12. Graceful shutdown.
+7. Health/readiness endpoints.
 13. Separate asynchronous cancellation notifications to already-running downstream calls.
-14. Integration tests with a real backend.
+9. Integration tests with a real backend.
 
 ## Security note
 

@@ -8,6 +8,7 @@ import java.util.Locale;
 /** Route-specific deadline budgets for new requests entering the API gateway. */
 public final class GatewayDeadlineRules {
     public record DeadlineBudget(String method, String route, long deadlineMillis) {}
+    public record Selection(String route, long deadlineMillis, boolean configured) {}
     private record Rule(String method, String path, long deadlineMillis, int literalSegments) {}
 
     private final List<Rule> rules;
@@ -55,6 +56,10 @@ public final class GatewayDeadlineRules {
     }
 
     public long deadlineMillis(String method, String requestTarget, long defaultMillis) {
+        return select(method, requestTarget, defaultMillis).deadlineMillis();
+    }
+
+    public Selection select(String method, String requestTarget, long defaultMillis) {
         String path = requestTarget;
         int query = path.indexOf('?');
         if (query >= 0) path = path.substring(0, query);
@@ -64,9 +69,9 @@ public final class GatewayDeadlineRules {
         String normalizedMethod = method.toUpperCase(Locale.ROOT);
         for (Rule rule : rules) {
             if (!(rule.method().equals("*") || rule.method().equals(normalizedMethod))) continue;
-            if (matches(rule.path(), path)) return rule.deadlineMillis();
+            if (matches(rule.path(), path)) return new Selection(rule.path(), rule.deadlineMillis(), true);
         }
-        return defaultMillis;
+        return new Selection("/_unmatched", defaultMillis, false);
     }
 
     /** Configured route budgets for bounded-cardinality Prometheus labels. */

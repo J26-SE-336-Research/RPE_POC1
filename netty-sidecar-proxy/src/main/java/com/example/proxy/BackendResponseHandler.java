@@ -7,6 +7,7 @@ import io.netty.channel.Channel;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaders;
+import io.opentelemetry.api.trace.Span;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -19,18 +20,24 @@ public final class BackendResponseHandler
     private final long deadline;
     private final boolean detectInboundDeadline;
     private final boolean ownsContext;
+    private final boolean gatewayChain;
+    private final Span requestSpan;
     private final ProxyMetrics.InboundRequestTracker inboundTracker;
     private final long requestStartNanos;
     private boolean receivedResponse;
+    private boolean spanEnded;
 
     public BackendResponseHandler(Channel clientChannel, String requestId, long deadline,
-                                  boolean detectInboundDeadline, boolean ownsContext,
+                                  boolean detectInboundDeadline, boolean ownsContext, boolean gatewayChain,
+                                  Span requestSpan,
                                   ProxyMetrics.InboundRequestTracker inboundTracker, long requestStartNanos) {
         this.clientChannel = clientChannel;
         this.requestId = requestId;
         this.deadline = deadline;
         this.detectInboundDeadline = detectInboundDeadline;
         this.ownsContext = ownsContext;
+        this.gatewayChain = gatewayChain;
+        this.requestSpan = requestSpan;
         this.inboundTracker = inboundTracker;
         this.requestStartNanos = requestStartNanos;
     }
@@ -40,8 +47,8 @@ public final class BackendResponseHandler
         receivedResponse = true;
         final int responseStatus = response.status().code();
         if (inboundTracker != null) {
-            ProxyMetrics.recordInboundFailure(responseStatus);
-            ProxyMetrics.recordInboundRequestDuration(System.nanoTime() - requestStartNanos);
+            ProxyMetrics.recordInboundFailure(responseStatus, inboundTracker);
+            ProxyMetrics.recordRequestDuration(System.nanoTime() - requestStartNanos, inboundTracker);
         }
         LOGGER.info(() -> "Backend response received requestId=" + requestId
                 + " status=" + responseStatus
@@ -51,6 +58,7 @@ public final class BackendResponseHandler
             LOGGER.warning(() -> "Client disconnected before backend response could be forwarded"
                     + " requestId=" + requestId + " client=" + clientChannel.remoteAddress());
             if (inboundTracker != null) inboundTracker.finish();
+            finishSpan(responseStatus, null);
             return;
         }
 
@@ -66,8 +74,16 @@ public final class BackendResponseHandler
                     + " (deadlineExceded=" + downstreamExpired
                     + ", cancellation_Triggered=" + downstreamCancellation + ")");
         }
+        boolean responseLate = deadline <= System.currentTimeMillis();
+        if (responseLate && !downstreamExpired) {
+            ProxyHandler.ContextEntry entry = ProxyHandler.contextEntry(requestId);
+            ProxyTelemetry.deadlineExceeded(requestSpan, requestId,
+                    entry == null ? 0 : entry.budgetMillis(), deadline, "response_completed_after_deadline");
+        }
+        if (gatewayChain) ProxyHandler.completeGatewayChain(requestId, responseLate || downstreamExpired);
         io.netty.handler.codec.http.HttpHeaders chainContext = ProxyHandler.requestContext(requestId);
         boolean expired = downstreamExpired
+                || responseLate
                 || (ownsContext && detectInboundDeadline && deadline <= System.currentTimeMillis())
                 || (chainContext != null && Boolean.parseBoolean(chainContext.get("deadlineExceded")));
         boolean cancellation = downstreamCancellation || expired || (chainContext != null
@@ -86,9 +102,10 @@ public final class BackendResponseHandler
         );
 
         clientChannel.writeAndFlush(forwarded).addListener(writeFuture -> {
+            finishSpan(responseStatus, writeFuture.isSuccess() ? null : writeFuture.cause());
             if (writeFuture.isSuccess()) {
                 if (inboundTracker != null) {
-                    ProxyMetrics.recordInboundSuccessfulRequest(responseStatus);
+                    ProxyMetrics.recordInboundSuccessfulRequest(responseStatus, inboundTracker);
                 }
                 LOGGER.info(() -> "Backend response forwarded to client requestId=" + requestId
                         + " status=" + responseStatus
@@ -105,6 +122,7 @@ public final class BackendResponseHandler
     public void channelInactive(ChannelHandlerContext ctx) {
         if (inboundTracker != null) inboundTracker.finish();
         if (!receivedResponse) {
+            finishSpan(502, null);
             LOGGER.warning(() -> "Backend connection closed before a response was received"
                     + " requestId=" + requestId + " backend=" + ctx.channel().remoteAddress());
         }
@@ -117,10 +135,17 @@ public final class BackendResponseHandler
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         LOGGER.log(Level.SEVERE, "Backend response pipeline failed requestId=" + requestId
                 + " backend=" + ctx.channel().remoteAddress(), cause);
+        finishSpan(502, cause);
         if (clientChannel.isActive()) {
             clientChannel.close();
         }
         if (inboundTracker != null) inboundTracker.finish();
         ctx.close();
+    }
+
+    private void finishSpan(int status, Throwable error) {
+        if (spanEnded) return;
+        spanEnded = true;
+        ProxyTelemetry.endHop(requestSpan, status, error);
     }
 }
