@@ -93,10 +93,15 @@ spec:
             - name: REQUEST_CONTEXT_TTL_MILLIS
               value: "20000"
           securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
             allowPrivilegeEscalation: false
             capabilities:
+              drop:
+                - ALL
               add:
-                - NET_ADMIN
+                - NET_RAW
 ---
 apiVersion: v1
 kind: Service

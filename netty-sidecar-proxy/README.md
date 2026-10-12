@@ -123,9 +123,13 @@ export PROXY_ROLE=service
 java -jar target/netty-sidecar-proxy-1.0.0.jar
 ```
 
-Inbound requests use Linux TPROXY: the proxy enables Netty's epoll transparent socket option and forwards to the original destination preserved on the accepted socket. Outbound HTTP requests to the service ports are redirected by the pod's `OUTPUT` NAT rules; because that redirection changes the accepted socket's local address, the proxy resolves the outbound destination from the HTTP `Host` header (or an absolute `http://` request URI). The outbound rules exclude UID `10001`, which is the proxy process, so its backend connections do not loop back through itself.
+Inbound requests use Linux TPROXY: the proxy enables Netty's epoll transparent socket option and forwards to the original destination preserved on the accepted socket. Outbound HTTP requests are redirected by the pod's `OUTPUT` NAT rules; because that redirection changes the accepted socket's local address, the proxy resolves the outbound destination from the HTTP `Host` header (or an absolute `http://` request URI). The manifests run the application as UID `10001` and the proxy as UID `0`, dropping all proxy capabilities except `NET_RAW` for the transparent socket. They exclude UID `0` from egress redirection so the proxy's backend connections do not loop back through itself. If the proxy identity changes, keep the bypass UID aligned with its `runAsUser`.
 
-The Kubernetes manifests configure inbound TPROXY rules and policy routing in an init container, plus outbound redirection for TCP ports `8081` through `8084`. This proof of concept handles HTTP/1.1 only; it does not intercept HTTPS/TLS or arbitrary TCP protocols. The shaded build includes Netty native epoll runtimes for Linux x86_64 and ARM64.
+The Kubernetes manifests configure inbound TPROXY rules and policy routing in an init container, plus outbound redirection limited to TCP ports `8081` through `8084`. This is specific to the demo's known service ports; a workload using another port needs its capture rules configured accordingly. This proof of concept handles plaintext HTTP/1.1 only. It does not intercept HTTPS/TLS, HTTP/2, or arbitrary TCP protocols. The shaded build includes Netty native epoll runtimes for Linux x86_64 and ARM64.
+
+### Initial adoption scope
+
+Treat this proxy as an opt-in Kubernetes prototype for Linux Pods whose HTTP/1.1 traffic uses explicitly configured TCP ports and whose cluster permits the required TPROXY, policy-routing, and `NET_ADMIN` operations. The current rules capture inbound traffic to each demo application's declared listen port and outbound traffic only to ports `8081`–`8084`; they are not yet generic rules for arbitrary workloads. Before broad adoption, define per-workload ports and exclusions (including health checks and control-plane traffic), test DNS and service routing on the target CNI, and verify Pod Security Admission permits the routing setup. HTTPS needs a separate TLS-aware design, and HTTP/2 and other protocols are currently unsupported.
 
 For the Minikube Docker driver, build and load the image referenced by the manifests before applying them:
 
