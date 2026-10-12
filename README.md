@@ -192,6 +192,12 @@ environment variables rather than hardcoded in `application.yml` —
   by the proxy layer.
 - **No authentication.** Out of scope for this proof-of-concept.
 
+## Kubernetes sidecar injection
+
+The Kubernetes manifests currently support manual proxy injection. The opt-in
+mutating admission webhook, its cert-manager TLS resources, and an Order service
+migration example are documented in [K8s/admission-webhook/README.md](K8s/admission-webhook/README.md).
+
 ## Stopping and resetting
 
 ```bash

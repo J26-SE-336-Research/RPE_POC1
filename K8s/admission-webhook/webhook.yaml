@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rrpe-admission-webhook
+  namespace: rrpe-system
+  labels:
+    app: rrpe-admission-webhook
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rrpe-admission-webhook
+  template:
+    metadata:
+      labels:
+        app: rrpe-admission-webhook
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: webhook
+          image: rrpe-admission-webhook:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          env:
+            - name: WEBHOOK_PORT
+              value: "8443"
+            - name: PROXY_IMAGE
+              value: 2002rusira/netty-sidecar-proxy-rpe-implementation:v9
+            - name: PROXY_IMAGE_PULL_POLICY
+              value: IfNotPresent
+            - name: REQUEST_CONTEXT_TTL_MILLIS
+              value: "20000"
+            - name: DEFAULT_DEADLINE_MILLIS
+              value: "5000"
+            - name: TLS_CERT_FILE
+              value: /tls/tls.crt
+            - name: TLS_KEY_FILE
+              value: /tls/tls.key
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 48Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: webhook-tls
+              mountPath: /tls
+              readOnly: true
+      volumes:
+        - name: webhook-tls
+          secret:
+            secretName: rrpe-admission-webhook-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rrpe-admission-webhook
+  namespace: rrpe-system
+spec:
+  selector:
+    app: rrpe-admission-webhook
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+      protocol: TCP
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: rrpe-pod-injector
+webhooks:
+  - name: pods.rrpe.resilience.dev
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    timeoutSeconds: 10
+    matchPolicy: Equivalent
+    clientConfig:
+      service:
+        namespace: rrpe-system
+        name: rrpe-admission-webhook
+        path: /mutate
+        port: 443
+      caBundle: ""
+    namespaceSelector:
+      matchLabels:
+        resilience.rrpe.dev/injection: enabled
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [rrpe-system]
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+        scope: Namespaced

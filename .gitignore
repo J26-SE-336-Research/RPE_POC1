@@ -79,6 +79,7 @@ ehthumbs_vista.db
 # ================================
 
 .env
+K8s/admission-webhook/tls/
 .env.*
 .env.example
 

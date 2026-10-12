@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apigateway-deployment
+spec:
+  template:
+    metadata:
+      annotations:
+        resilience.rrpe.dev/inject: "enabled"
+        resilience.rrpe.dev/role: "gateway"
+        resilience.rrpe.dev/default-deadline-ms: "1000"
+    spec:
+      initContainers:
+        - name: configure-proxy-routing
+          $patch: delete
+      containers:
+        - name: netty-proxy
+          $patch: delete
