@@ -194,9 +194,11 @@ environment variables rather than hardcoded in `application.yml` —
 
 ## Kubernetes sidecar injection
 
-The Kubernetes manifests currently support manual proxy injection. The opt-in
-mutating admission webhook, its cert-manager TLS resources, and an Order service
-migration example are documented in [K8s/admission-webhook/README.md](K8s/admission-webhook/README.md).
+The Kubernetes Deployment manifests opt workloads into the mutating admission
+webhook and keep only the application containers plus proxy configuration
+annotations. The webhook injects the proxy and routing init container. Setup,
+certificate generation, and migration guidance are in
+[K8s/admission-webhook/README.md](K8s/admission-webhook/README.md).
 
 ## Stopping and resetting
 

@@ -16,69 +16,12 @@ spec:
         resilience.rrpe.dev/outbound-ports: "8081:8084"
         resilience.rrpe.dev/excluded-outbound-ports: ""
         resilience.rrpe.dev/proxy-port: "15001"
+        resilience.rrpe.dev/inject: "enabled"
+        resilience.rrpe.dev/role: "gateway"
+        resilience.rrpe.dev/default-deadline-ms: "1000"
       labels:
         app: apigateway
     spec:
-      initContainers:
-        - name: configure-proxy-routing
-          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v9
-          imagePullPolicy: IfNotPresent
-          command: ["/bin/sh", "-ec"]
-          args:
-            - |
-              INBOUND_PORTS="${PROXY_INBOUND_PORTS:-}"
-              OUTBOUND_PORTS="${PROXY_OUTBOUND_PORTS:-}"
-              EXCLUDED_OUTBOUND_PORTS="${PROXY_EXCLUDED_OUTBOUND_PORTS:-}"
-              PROXY_PORT="${SIDECAR_PROXY_PORT:-}"
-              validate_ports() {
-                case "$1" in
-                  *[!0123456789,:-]*) echo "Invalid port list: $1" >&2; exit 1 ;;
-                esac
-              }
-              [ -n "$INBOUND_PORTS" ] || { echo "inbound ports annotation is required" >&2; exit 1; }
-              [ -n "$PROXY_PORT" ] || { echo "proxy port annotation is required" >&2; exit 1; }
-              validate_ports "$INBOUND_PORTS"
-              validate_ports "$OUTBOUND_PORTS"
-              validate_ports "$EXCLUDED_OUTBOUND_PORTS"
-              iptables -t mangle -N SIDECAR_TPROXY 2>/dev/null || true
-              iptables -t mangle -F SIDECAR_TPROXY
-              iptables -t mangle -A SIDECAR_TPROXY -i lo -j RETURN
-              iptables -t mangle -A SIDECAR_TPROXY -p tcp -m multiport --dports "$INBOUND_PORTS" -j TPROXY --on-port "$PROXY_PORT" --tproxy-mark 0x1/0x1
-              iptables -t mangle -C PREROUTING -j SIDECAR_TPROXY 2>/dev/null || iptables -t mangle -I PREROUTING 1 -j SIDECAR_TPROXY
-              ip rule add fwmark 0x1/0x1 lookup 100 2>/dev/null || true
-              ip route replace local 0.0.0.0/0 dev lo table 100
-              iptables -t nat -N SIDECAR_EGRESS 2>/dev/null || true
-              iptables -t nat -F SIDECAR_EGRESS
-              iptables -t nat -A SIDECAR_EGRESS -m owner --uid-owner 0 -j RETURN
-              if [ -n "$EXCLUDED_OUTBOUND_PORTS" ]; then
-                iptables -t nat -A SIDECAR_EGRESS -p tcp -m multiport --dports "$EXCLUDED_OUTBOUND_PORTS" -j RETURN
-              fi
-              if [ -n "$OUTBOUND_PORTS" ]; then
-                iptables -t nat -A SIDECAR_EGRESS -p tcp -m multiport --dports "$OUTBOUND_PORTS" -j REDIRECT --to-ports "$PROXY_PORT"
-              fi
-              iptables -t nat -C OUTPUT -j SIDECAR_EGRESS 2>/dev/null || iptables -t nat -I OUTPUT 1 -j SIDECAR_EGRESS
-          env:
-            - name: PROXY_INBOUND_PORTS
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.annotations['resilience.rrpe.dev/inbound-ports']
-            - name: PROXY_OUTBOUND_PORTS
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.annotations['resilience.rrpe.dev/outbound-ports']
-            - name: PROXY_EXCLUDED_OUTBOUND_PORTS
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.annotations['resilience.rrpe.dev/excluded-outbound-ports']
-            - name: SIDECAR_PROXY_PORT
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.annotations['resilience.rrpe.dev/proxy-port']
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              add:
-                - NET_ADMIN
       containers:
         - name: apigateway
           securityContext:
@@ -112,35 +55,6 @@ spec:
                 configMapKeyRef:
                   name: rpe-config
                   key: NOTIFICATION_SERVICE_URL
-        - name: netty-proxy
-          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v9
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: proxy
-              containerPort: 15001
-            - name: metrics
-              containerPort: 9090
-          env:
-            - name: PROXY_ROLE
-              value: gateway
-            - name: PROXY_LISTEN_HOST
-              value: 0.0.0.0
-            - name: PROXY_LISTEN_PORT
-              value: "15001"
-            - name: DEFAULT_DEADLINE_MILLIS
-              value: "1000"
-            - name: REQUEST_CONTEXT_TTL_MILLIS
-              value: "20000"
-          securityContext:
-            runAsNonRoot: false
-            runAsUser: 0
-            runAsGroup: 0
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-              add:
-                - NET_RAW
 ---
 apiVersion: v1
 kind: Service
@@ -151,6 +65,6 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
-      nodePort: 30080
+      nodePort: 30081
   selector:
     app: apigateway

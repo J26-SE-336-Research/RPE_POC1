@@ -48,6 +48,23 @@ The generated service certificate is valid for 90 days; rerun the setup script
 and restart the webhook Deployment before it expires. The generated key files
 are ignored by Git under `K8s/admission-webhook/tls/`.
 
+## Apply the application manifests
+
+The application Deployment manifests now contain only the application
+containers, proxy settings annotations, and webhook opt-in. Apply them only
+after the webhook is ready and the target namespace has the injection label:
+
+```powershell
+kubectl apply -f K8s/Api_Gateway_Deployment.yaml
+kubectl apply -f K8s/Order_Service_Deployment.yaml
+kubectl apply -f K8s/Inventory_Service_Deployment.yaml
+kubectl apply -f K8s/Payment_Service_Deployment.yaml
+kubectl apply -f K8s/Notification_Service_Deployment.yaml
+```
+
+The gateway Service uses NodePort `30081`; this avoids colliding with the older
+`rrpe-ecommerce` stack, which already uses `30080`.
+
 ## Opt a workload in
 
 The Pod template must have these annotations:
@@ -68,10 +85,11 @@ the gateway role. For the API gateway, set role to `gateway`, use its tested
 proxy port `15001`, and set `default-deadline-ms` to the desired gateway
 deadline (the current manual deployment uses `1000`).
 
-**Migration from the manual setup:** remove the manually declared
-`configure-proxy-routing` init container and `netty-proxy` sidecar from the
-workload before adding the opt-in annotation. The webhook rejects opted-in Pods
-that already contain those names, preventing duplicate interception rules.
+**Migration from the manual setup:** the webhook rejects opted-in Pods that
+already contain a `configure-proxy-routing` init container or `netty-proxy`
+sidecar, preventing duplicate interception rules. The included strategic-merge
+patches are for deployments already created from the older manual manifests;
+new deployments can use the updated manifests directly.
 
 For the currently deployed Order service, the included strategic-merge patch
 and four companion patches migrate the demo workloads by removing their
@@ -103,8 +121,9 @@ kubectl get pods -o json | ConvertFrom-Json | ForEach-Object { $_.items | ForEac
 ```
 
 The init-container and container output should each list one injected component.
-Then run the existing gateway request check and correlate its request ID in the
-proxy logs, as with the manual sidecar deployment.
+Then send a fresh request through the gateway without supplying `Request_id`;
+the gateway proxy creates the chain ID and the service proxy retrieves its
+stored context for downstream calls.
 
 ## Configuration
 
