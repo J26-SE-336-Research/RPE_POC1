@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rrpe-config
+  namespace: rrpe-ecommerce
+data:
+  SPRING_DATASOURCE_URL_ORDER: jdbc:postgresql://postgres:5432/orderdb
+  SPRING_DATASOURCE_URL_INVENTORY: jdbc:postgresql://postgres:5432/inventorydb
+  SPRING_DATASOURCE_URL_PAYMENT: jdbc:postgresql://postgres:5432/paymentdb
+  ORDER_SERVICE_URL: http://order:8081
+  INVENTORY_SERVICE_URL: http://inventory:8082
+  PAYMENT_SERVICE_URL: http://payment:8083
+  NOTIFICATION_SERVICE_URL: http://notification:8084
+  PAYMENT_SIMULATED_FAILURE_RATE: "0.15"
+  API_GATEWAY_HOST: gateway
+  API_GATEWAY_PORT: "8080"

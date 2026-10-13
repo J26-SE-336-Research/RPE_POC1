@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: rrpe-ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: rameshkalhara/rrpe-frontend:contabo-20261013
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          env:
+            - name: API_GATEWAY_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: API_GATEWAY_HOST
+            - name: API_GATEWAY_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: API_GATEWAY_PORT
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: rrpe-ecommerce
+spec:
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rrpe-ecommerce
+  namespace: rrpe-ecommerce
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

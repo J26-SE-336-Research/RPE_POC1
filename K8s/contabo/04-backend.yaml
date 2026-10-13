@@ -1,0 +1,289 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification
+  namespace: rrpe-ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification
+  template:
+    metadata:
+      labels:
+        app: notification
+      annotations:
+        resilience.rrpe.dev/inject: "enabled"
+        resilience.rrpe.dev/role: "service"
+        resilience.rrpe.dev/inbound-ports: "8084"
+        resilience.rrpe.dev/outbound-ports: ""
+        resilience.rrpe.dev/excluded-outbound-ports: ""
+        resilience.rrpe.dev/proxy-port: "8080"
+    spec:
+      containers:
+        - name: notification
+          image: rameshkalhara/rrpe-notification-service:contabo-20261013
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8084
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification
+  namespace: rrpe-ecommerce
+spec:
+  selector:
+    app: notification
+  ports:
+    - port: 8084
+      targetPort: 8084
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory
+  namespace: rrpe-ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory
+  template:
+    metadata:
+      labels:
+        app: inventory
+      annotations:
+        resilience.rrpe.dev/inject: "enabled"
+        resilience.rrpe.dev/role: "service"
+        resilience.rrpe.dev/inbound-ports: "8082"
+        resilience.rrpe.dev/outbound-ports: ""
+        resilience.rrpe.dev/excluded-outbound-ports: ""
+        resilience.rrpe.dev/proxy-port: "8080"
+    spec:
+      containers:
+        - name: inventory
+          image: rameshkalhara/rrpe-inventory-service:contabo-20261013
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8082
+          env:
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: SPRING_DATASOURCE_URL_INVENTORY
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory
+  namespace: rrpe-ecommerce
+spec:
+  selector:
+    app: inventory
+  ports:
+    - port: 8082
+      targetPort: 8082
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment
+  namespace: rrpe-ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payment
+  template:
+    metadata:
+      labels:
+        app: payment
+      annotations:
+        resilience.rrpe.dev/inject: "enabled"
+        resilience.rrpe.dev/role: "service"
+        resilience.rrpe.dev/inbound-ports: "8083"
+        resilience.rrpe.dev/outbound-ports: ""
+        resilience.rrpe.dev/excluded-outbound-ports: ""
+        resilience.rrpe.dev/proxy-port: "8080"
+    spec:
+      containers:
+        - name: payment
+          image: rameshkalhara/rrpe-payment-service:contabo-20261013
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8083
+          env:
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: SPRING_DATASOURCE_URL_PAYMENT
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment
+  namespace: rrpe-ecommerce
+spec:
+  selector:
+    app: payment
+  ports:
+    - port: 8083
+      targetPort: 8083
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  namespace: rrpe-ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order
+  template:
+    metadata:
+      labels:
+        app: order
+      annotations:
+        resilience.rrpe.dev/inject: "enabled"
+        resilience.rrpe.dev/role: "service"
+        resilience.rrpe.dev/inbound-ports: "8081"
+        resilience.rrpe.dev/outbound-ports: "8082:8084"
+        resilience.rrpe.dev/excluded-outbound-ports: ""
+        resilience.rrpe.dev/proxy-port: "8080"
+    spec:
+      containers:
+        - name: order
+          image: rameshkalhara/rrpe-order-service:contabo-20261013
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8081
+          env:
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: SPRING_DATASOURCE_URL_ORDER
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: INVENTORY_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: INVENTORY_SERVICE_URL
+            - name: PAYMENT_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: PAYMENT_SERVICE_URL
+            - name: NOTIFICATION_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: NOTIFICATION_SERVICE_URL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order
+  namespace: rrpe-ecommerce
+spec:
+  selector:
+    app: order
+  ports:
+    - port: 8081
+      targetPort: 8081
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: rrpe-ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+      annotations:
+        resilience.rrpe.dev/inject: "enabled"
+        resilience.rrpe.dev/role: "gateway"
+        resilience.rrpe.dev/inbound-ports: "8080"
+        resilience.rrpe.dev/outbound-ports: "8081:8084"
+        resilience.rrpe.dev/excluded-outbound-ports: ""
+        resilience.rrpe.dev/proxy-port: "15001"
+        resilience.rrpe.dev/default-deadline-ms: "1000"
+    spec:
+      containers:
+        - name: gateway
+          image: rameshkalhara/rrpe-api-gateway:contabo-20261013
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ORDER_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: ORDER_SERVICE_URL
+            - name: INVENTORY_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: INVENTORY_SERVICE_URL
+            - name: PAYMENT_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: PAYMENT_SERVICE_URL
+            - name: NOTIFICATION_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: rrpe-config
+                  key: NOTIFICATION_SERVICE_URL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: rrpe-ecommerce
+spec:
+  selector:
+    app: gateway
+  ports:
+    - port: 8080
+      targetPort: 8080
