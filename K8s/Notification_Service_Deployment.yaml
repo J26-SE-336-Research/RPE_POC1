@@ -11,35 +11,16 @@ spec:
       app: notification
   template:
     metadata:
+      annotations:
+        resilience.rrpe.dev/inbound-ports: "8084"
+        resilience.rrpe.dev/outbound-ports: ""
+        resilience.rrpe.dev/excluded-outbound-ports: ""
+        resilience.rrpe.dev/proxy-port: "8080"
+        resilience.rrpe.dev/inject: "enabled"
+        resilience.rrpe.dev/role: "service"
       labels:
         app: notification
     spec:
-      initContainers:
-        - name: configure-proxy-routing
-          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v14
-          imagePullPolicy: IfNotPresent
-          command: ["/bin/sh", "-ec"]
-          args:
-            - |
-              APP_PORT=8084
-              PROXY_PORT=8080
-              iptables -t mangle -N SIDECAR_TPROXY 2>/dev/null || true
-              iptables -t mangle -F SIDECAR_TPROXY
-              iptables -t mangle -A SIDECAR_TPROXY -i lo -j RETURN
-              iptables -t mangle -A SIDECAR_TPROXY -p tcp --dport "$APP_PORT" -j TPROXY --on-port "$PROXY_PORT" --tproxy-mark 0x1/0x1
-              iptables -t mangle -C PREROUTING -j SIDECAR_TPROXY 2>/dev/null || iptables -t mangle -I PREROUTING 1 -j SIDECAR_TPROXY
-              ip rule add fwmark 0x1/0x1 lookup 100 2>/dev/null || true
-              ip route replace local 0.0.0.0/0 dev lo table 100
-              iptables -t nat -N SIDECAR_EGRESS 2>/dev/null || true
-              iptables -t nat -F SIDECAR_EGRESS
-              iptables -t nat -A SIDECAR_EGRESS -m owner --uid-owner 0 -j RETURN
-              iptables -t nat -A SIDECAR_EGRESS -p tcp --dport 8081:8084 -j REDIRECT --to-ports "$PROXY_PORT"
-              iptables -t nat -C OUTPUT -j SIDECAR_EGRESS 2>/dev/null || iptables -t nat -I OUTPUT 1 -j SIDECAR_EGRESS
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              add:
-                - NET_ADMIN
       containers:
         - name: notification
           securityContext:
@@ -49,39 +30,6 @@ spec:
           image: 2002rusira/notification-service-rpe-implementation:v1
           ports:
             - containerPort: 8084
-        - name: netty-proxy
-          image: 2002rusira/netty-sidecar-proxy-rpe-implementation:v14
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: proxy
-              containerPort: 8080
-            - name: metrics
-              containerPort: 9090
-          env:
-            - name: PROXY_ROLE
-              value: service
-            - name: SERVICE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.labels['app']
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              valueFrom:
-                configMapKeyRef:
-                  name: rpe-config
-                  key: OTEL_EXPORTER_OTLP_ENDPOINT
-            - name: PROXY_LISTEN_HOST
-              value: 0.0.0.0
-            - name: PROXY_LISTEN_PORT
-              value: "8080"
-            - name: PROXY_DETECT_INBOUND_DEADLINE
-              value: "true"
-            - name: REQUEST_CONTEXT_TTL_MILLIS
-              value: "20000"
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              add:
-                - NET_ADMIN
 ---
 apiVersion: v1
 kind: Service

@@ -192,6 +192,14 @@ environment variables rather than hardcoded in `application.yml` —
   by the proxy layer.
 - **No authentication.** Out of scope for this proof-of-concept.
 
+## Kubernetes sidecar injection
+
+The Kubernetes Deployment manifests opt workloads into the mutating admission
+webhook and keep only the application containers plus proxy configuration
+annotations. The webhook injects the proxy and routing init container. Setup,
+certificate generation, and migration guidance are in
+[K8s/admission-webhook/README.md](K8s/admission-webhook/README.md).
+
 ## Stopping and resetting
 
 ```bash

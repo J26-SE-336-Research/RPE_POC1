@@ -98,7 +98,7 @@ The context map is in the proxy process's memory. Each request chain must pass t
 
 TPROXY does not change the application's target address. It intercepts packets in Linux, gives them to the transparent listener, and keeps the packet's original destination available. The proxy then connects to that original destination.
 
-In this repository's Kubernetes setup, inbound service traffic uses TPROXY in each pod's `mangle/PREROUTING` chain. Locally generated HTTP calls use `nat/OUTPUT` REDIRECT to the same sidecar listener; the proxy routes those requests using the HTTP `Host` authority. The proxy's Linux UID is excluded from that rule so its backend connection does not loop back into the sidecar. This egress path supports the HTTP/1.1 service calls on ports 8081–8084, not arbitrary TCP or TLS.
+In this repository's Kubernetes setup, inbound service traffic uses TPROXY in each pod's `mangle/PREROUTING` chain. Locally generated HTTP calls use `nat/OUTPUT` REDIRECT to the same sidecar listener; the proxy routes those requests using the HTTP `Host` authority. The proxy's Linux UID is excluded from that rule so its backend connection does not loop back into the sidecar. Pod-template annotations configure the inbound port list, outbound allowlist, optional excluded outbound ports, and proxy listener port; the init container reads them through the Downward API. Lists use iptables multiport syntax, such as `8081,8083:8084`. This egress path supports plaintext HTTP/1.1 only, not arbitrary TCP or TLS.
 
 For the current code to work, all of these must be true:
 
@@ -107,7 +107,7 @@ For the current code to work, all of these must be true:
 3. The rules intercept the intended TCP traffic and deliver it to that port while preserving the original destination.
 4. Policy routing marks and routes TPROXY packets locally, as required by Linux TPROXY.
 5. Proxy connections to the original destination are excluded from interception, or they will loop back into the proxy.
-6. The proxy container has the capability needed to set `IP_TRANSPARENT`. The Linux documentation says this normally requires `CAP_NET_ADMIN` or `CAP_NET_RAW`; use the narrowest capability accepted by your cluster and runtime.
+6. The proxy container has the capability needed to set `IP_TRANSPARENT`. The current Minikube-tested proxy runs as UID `0` with all capabilities dropped except `NET_RAW`; the Linux documentation says `CAP_NET_ADMIN` or `CAP_NET_RAW` can be used.
 7. The pod security policy, admission policy, and cluster runtime allow the required capability and network rules. Some clusters prohibit this. A privileged init container or node-level setup may be needed to install the rules; the proxy process itself should not receive broad privileges just to install rules if that can be avoided.
 
 ### Linux rule shape (example only)
@@ -137,16 +137,19 @@ Use the equivalent nftables rules if your cluster uses nftables. Do not install 
 
 ### Pod permissions: example shape
 
-The Kubernetes security context can grant a Linux capability to the proxy container. The example below shows the form only; your cluster security policy must allow it, and the cluster team must decide whether `NET_ADMIN` or `NET_RAW` is sufficient for this runtime and setup.
+The Kubernetes security context can grant a Linux capability to the proxy container. The current demo runs the proxy as UID `0` with only `NET_RAW`; the separate routing init container runs as UID `0` with `NET_ADMIN` to install iptables and policy routing. Your cluster security policy must allow these settings.
 
 ```yaml
 containers:
   - name: sidecar-proxy
     image: your-proxy-image
     securityContext:
+      runAsNonRoot: false
+      runAsUser: 0
       allowPrivilegeEscalation: false
       capabilities:
-        add: ["NET_ADMIN"] # Or the narrower capability proven sufficient in your environment.
+        drop: ["ALL"]
+        add: ["NET_RAW"]
 ```
 
 If a separate init container installs iptables rules, it may need `NET_ADMIN` and the required iptables tools. Keep those rule-installing permissions separate from the long-running Java proxy when possible. Kubernetes clusters may reject these permissions through Pod Security Admission or a policy engine; that must be resolved by the cluster administrator.
