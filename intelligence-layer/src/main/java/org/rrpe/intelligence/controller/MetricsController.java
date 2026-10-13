@@ -149,7 +149,7 @@ public class MetricsController {
             var plan = new RecommendationPlan(analysis.schemaVersion(), analysis.mode(), analysis.serviceName(),
                     HealthStatus.valueOf(analysis.status()), analysis.sourceCollectedAt(), analysis.generatedAt(),
                     analysis.expiresAt(), analysis.evidence(), analysis.recommendations());
-            return new ReviewSubmission(true, "Recommendation saved for review.", reviews.submitServicePlan(plan), analysis);
+            return new ReviewSubmission(true, "Service policy decision recorded automatically. Distribution is pending Component 3 integration.", reviews.submitServicePlan(plan), analysis);
         }
     }
 

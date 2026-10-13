@@ -21,13 +21,14 @@ spec:
           env:
             - name: SERVER_PORT
               value: "8090"
-            # Prometheus and Tempo are NOT in k8s/ yet. These point at the
-            # intended service names; the pod will start fine without them
-            # but the dashboard will show empty data until they exist.
+            # Tempo is deployed by 11-tempo.yaml. Prometheus belongs to the
+            # separately installed monitoring stack; verify its real Service DNS.
             - name: PROMETHEUS_URL
               value: "http://prometheus:9090"
             - name: TEMPO_URL
               value: "http://tempo:3200"
+            - name: PROMETHEUS_COLLECTION_ENABLED
+              value: "false"
           startupProbe:
             httpGet:
               path: /actuator/health

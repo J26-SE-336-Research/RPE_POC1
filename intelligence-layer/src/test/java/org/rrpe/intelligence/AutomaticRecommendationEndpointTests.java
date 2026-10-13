@@ -116,7 +116,7 @@ class AutomaticRecommendationEndpointTests {
         assertTrue(listed);
         var queued = ok(service + "/reviews", mapper.createObjectNode());
         assertTrue(queued.get("ready").asBoolean());
-        assertEquals("PENDING", queued.get("review").get("status").asString());
+        assertEquals("AUTO_APPROVED", queued.get("review").get("status").asString());
         assertEquals(result.get("recommendations"), queued.get("review").get("servicePlan").get("recommendations"));
         assertEquals(result.get("sourceCollectedAt"), queued.get("review").get("servicePlan").get("sourceCollectedAt"));
         assertEquals(300, Duration.between(Instant.parse(result.get("generatedAt").asString()),

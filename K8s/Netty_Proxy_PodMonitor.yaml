@@ -6,6 +6,8 @@ metadata:
   labels:
     release: monitoring
 spec:
+  podTargetLabels:
+    - app
   namespaceSelector:
     matchNames:
       - default

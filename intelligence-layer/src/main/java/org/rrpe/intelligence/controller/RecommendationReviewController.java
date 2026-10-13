@@ -60,7 +60,7 @@ public class RecommendationReviewController {
         if (plan.recommendations().isEmpty()) {
             return new Submission(true, "No service policy changes are suggested.", null, plan);
         }
-        return new Submission(true, "Recommendation saved for review.", reviews.submitServicePlan(plan), plan);
+        return new Submission(true, "Service policy decision recorded automatically. Distribution is pending Component 3 integration.", reviews.submitServicePlan(plan), plan);
     }
 
     @PostMapping("/deadline")

@@ -51,13 +51,13 @@ class RecommendationReviewEndpointTests {
 
     @Test
     void approvalPreservesTheOriginalPlanAndReplayPreservesAuditTime() throws Exception {
-        var submission = ok("/api/v1/reviews/service", metrics("stressed"));
+        var submission = ok("/api/v1/reviews/deadline", deadline());
         var pending = submission.get("review");
         assertEquals("PENDING", pending.get("status").asString());
-        assertEquals(submission.get("analysis"), pending.get("servicePlan"));
+        assertEquals(submission.get("analysis"), pending.get("deadlinePlan"));
         var approved = ok("/api/v1/reviews/decisions", decision(pending, "APPROVE"));
         assertEquals("APPROVED", approved.get("status").asString());
-        assertEquals(pending.get("servicePlan"), approved.get("servicePlan"));
+        assertEquals(pending.get("deadlinePlan"), approved.get("deadlinePlan"));
         assertEquals(pending.get("submittedAt"), approved.get("submittedAt"));
         assertEquals(approved, ok("/api/v1/reviews/decisions", decision(pending, "APPROVE")));
         assertEquals(approved, ok("/api/v1/reviews/" + pending.get("recommendationId").asString(), null));
@@ -65,7 +65,7 @@ class RecommendationReviewEndpointTests {
 
     @Test
     void rejectionCannotBeOverwrittenByApproval() throws Exception {
-        var pending = ok("/api/v1/reviews/service", metrics("overloaded")).get("review");
+        var pending = ok("/api/v1/reviews/deadline", deadline()).get("review");
         var rejected = ok("/api/v1/reviews/decisions", decision(pending, "REJECT"));
         assertEquals("REJECTED", rejected.get("status").asString());
         var conflict = request("/api/v1/reviews/decisions", decision(pending, "APPROVE"));
@@ -83,6 +83,26 @@ class RecommendationReviewEndpointTests {
         assertFalse(waiting.get("ready").asBoolean());
         assertTrue(waiting.get("review").isNull());
         assertEquals("WAITING_FOR_OBSERVATIONS", waiting.get("analysis").get("status").asString());
+    }
+
+    private ObjectNode deadline() {
+        Instant end = Instant.now().minusSeconds(1);
+        var body = mapper.createObjectNode().put("chainId", "review-chain-" + UUID.randomUUID()).put("chainHealth", "STRESSED")
+                .put("windowStart", end.minusSeconds(300).toString()).put("windowEnd", end.toString())
+                .put("requestCount", 1000).put("deadlineFailureCount", 20).put("p99LatencyMs", 1200).put("currentDeadlineMs", 1000);
+        body.putArray("services").add("order").add("payment");
+        return body;
+    }
+
+    @Test
+    void serviceControlsAreAutomaticAndCannotReceiveHumanDecisions() throws Exception {
+        var service = ok("/api/v1/reviews/service", metrics("overloaded")).get("review");
+        assertEquals("AUTO_APPROVED", service.get("status").asString());
+        assertEquals("automatic-policy-controller", service.get("reviewer").asString());
+        assertEquals(409, request("/api/v1/reviews/decisions", decision(service, "APPROVE")).statusCode());
+        assertEquals(409, request("/api/v1/reviews/decisions", decision(service, "REJECT")).statusCode());
+        var updates = ok("/api/v2/intelligence/outbox", null);
+        assertEquals(0, updates.size(), "Legacy/synthetic decisions never enter the corrected live outbox");
     }
 
     @Test

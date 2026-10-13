@@ -34,26 +34,44 @@ class RecommendationReviewServiceTests {
                         Map.of("maxAttempts", 1), "test")));
     }
 
+    private ChainDeadlineRecommendation deadlinePlan() {
+        return new ChainDeadlineRecommendation("1.0", "ADVISORY", "test-chain", "READY", true, true,
+                "CHANGE_CHAIN_DEADLINE", 1440L, "test", null, 1.2, START, START.plusSeconds(300));
+    }
     private RecommendationReviewRequest decision(RecommendationReview review, Decision action) {
         return new RecommendationReviewRequest(review.recommendationId(), action, "reviewer", "test comment");
     }
 
     @Test
+    void automaticServiceDecisionsExpireAndPreserveTheirAudit() {
+        var automatic = service.submitServicePlan(plan());
+        assertEquals(Status.AUTO_APPROVED, automatic.status());
+        assertEquals("automatic-policy-controller", automatic.reviewer());
+        assertEquals(409, assertThrows(ResponseStatusException.class,
+                () -> service.review(decision(automatic, Decision.APPROVE))).getStatusCode().value());
+        clock.now = START.plusSeconds(300);
+        var expired = service.find(automatic.recommendationId());
+        assertEquals(Status.EXPIRED, expired.status());
+        assertEquals(automatic.reviewedAt(), expired.reviewedAt());
+        assertEquals(automatic.reviewer(), expired.reviewer());
+    }
+
+    @Test
     void exactExpiryBoundaryClosesPendingReviewWithoutRecordingAnApproval() {
-        var pending = service.submitServicePlan(plan());
+        var pending = service.submitDeadlinePlan(deadlinePlan());
         clock.now = START.plusSeconds(300);
         var expired = service.review(decision(pending, Decision.APPROVE));
         assertEquals(Status.EXPIRED, expired.status());
         assertNull(expired.reviewedAt());
         assertNull(expired.reviewer());
-        assertEquals(pending.servicePlan(), expired.servicePlan());
+        assertEquals(pending.deadlinePlan(), expired.deadlinePlan());
         assertEquals(expired, service.review(decision(pending, Decision.REJECT)));
         assertEquals(expired, service.findLatest(100).get(0));
     }
 
     @Test
     void approvalDoesNotRestartValidityAndExpiryKeepsTheOriginalAuditRecord() {
-        var pending = service.submitServicePlan(plan());
+        var pending = service.submitDeadlinePlan(deadlinePlan());
         clock.now = START.plusSeconds(299);
         var approved = service.review(decision(pending, Decision.APPROVE));
         assertEquals(Status.APPROVED, approved.status());
@@ -77,13 +95,13 @@ class RecommendationReviewServiceTests {
             }
         };
         var workflow = new RecommendationReviewService(advancingStore, clock);
-        var pending = workflow.submitServicePlan(plan());
+        var pending = workflow.submitDeadlinePlan(deadlinePlan());
         assertEquals(Status.EXPIRED, workflow.review(decision(pending, Decision.APPROVE)).status());
     }
 
     @Test
     void rejectedHistoryRemainsRejectedAfterPlanExpiry() {
-        var pending = service.submitServicePlan(plan());
+        var pending = service.submitDeadlinePlan(deadlinePlan());
         var rejected = service.review(decision(pending, Decision.REJECT));
         clock.now = START.plusSeconds(600);
         assertEquals(rejected, service.find(pending.recommendationId()));
@@ -93,7 +111,7 @@ class RecommendationReviewServiceTests {
 
     @Test
     void simultaneousOppositeDecisionsProduceOneWinner() throws Exception {
-        var pending = service.submitServicePlan(plan());
+        var pending = service.submitDeadlinePlan(deadlinePlan());
         var gate = new CountDownLatch(1);
         var executor = Executors.newFixedThreadPool(2);
         try {
@@ -114,7 +132,7 @@ class RecommendationReviewServiceTests {
 
     @Test
     void storageRejectsDuplicateAndEditedPlansAndReturnsAnImmutableBoundedList() {
-        var pending = service.submitServicePlan(plan());
+        var pending = service.submitDeadlinePlan(deadlinePlan());
         assertFalse(store.insert(pending));
         var edited = new RecommendationPlan("1.0", "ADVISORY", "edited-service", HealthStatus.OVERLOADED,
                 START.minusSeconds(10), START, START.plusSeconds(600), List.of(), plan().recommendations());
@@ -129,7 +147,7 @@ class RecommendationReviewServiceTests {
     @Test
     void expiredAndNonActionablePlansCannotBeQueued() {
         clock.now = START.plusSeconds(300);
-        assertEquals(400, assertThrows(ResponseStatusException.class, () -> service.submitServicePlan(plan())).getStatusCode().value());
+        assertEquals(400, assertThrows(ResponseStatusException.class, () -> service.submitDeadlinePlan(deadlinePlan())).getStatusCode().value());
         clock.now = START;
         var healthy = new RecommendationPlan("1.0", "ADVISORY", "healthy", HealthStatus.HEALTHY,
                 START.minusSeconds(10), START, START.plusSeconds(300), List.of(), List.of());

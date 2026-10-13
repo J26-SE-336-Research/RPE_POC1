@@ -11,7 +11,8 @@ import java.util.UUID;
  *
  * This model does not persist records, enforce expiry, authenticate reviewers,
  * or deliver policies. Those responsibilities belong to later workflow layers.
- * An APPROVED record means human approval, not successful policy application.
+ * APPROVED means human approval; AUTO_APPROVED means an automatic service-policy decision.
+ * Neither status confirms successful policy application.
  * An EXPIRED record does not remove a policy that was already applied.
  */
 public record RecommendationReview(
@@ -44,6 +45,6 @@ public record RecommendationReview(
     }
 
     public enum Status {
-        PENDING, APPROVED, REJECTED, EXPIRED
+        PENDING, APPROVED, AUTO_APPROVED, REJECTED, EXPIRED
     }
 }

@@ -20,7 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Records human decisions against exact server-generated plans. Submission
+ * Records automatic service decisions and human chain-deadline decisions against server-generated plans. Submission
  * methods are for internal generation paths, not client-supplied policy bodies.
  * Expiry is evaluated on lookup and review, including for approved plans.
  * This service does not reassess telemetry, authenticate reviewer labels,
@@ -45,9 +45,23 @@ public class RecommendationReviewService {
     public RecommendationReview submitServicePlan(RecommendationPlan plan) {
         if (plan == null || !"1.0".equals(plan.schemaVersion()) || !"ADVISORY".equals(plan.mode())
                 || plan.serviceName() == null || plan.serviceName().isBlank()
-                || plan.status() == null || plan.status() == HealthStatus.HEALTHY
+                || plan.status() == null
                 || plan.recommendations().isEmpty()) {
             throw badRequest("An actionable advisory service plan is required");
+        }
+        for (var action : plan.recommendations()) {
+            if (action.action() == null) throw badRequest("Unsupported automatic service action");
+            Number value = action.parameters().get(switch (action.action()) {
+                case RATE_LIMIT -> "maxRequestsPerSecond";
+                case RETRY_BUDGET -> "retryBudgetRatio";
+                case DISABLE_RETRIES -> "maxAttempts";
+            });
+            if (value == null || !Double.isFinite(value.doubleValue())
+                    || (action.action() == RecommendationPlan.Action.RATE_LIMIT && value.doubleValue() <= 0)
+                    || (action.action() == RecommendationPlan.Action.RETRY_BUDGET && (value.doubleValue() < 0 || value.doubleValue() > 0.10))
+                    || (action.action() == RecommendationPlan.Action.DISABLE_RETRIES && value.doubleValue() != 1)) {
+                throw badRequest("Invalid automatic service policy parameters");
+            }
         }
         return submit(plan, null, plan.generatedAt(), plan.expiresAt());
     }
@@ -71,7 +85,9 @@ public class RecommendationReviewService {
         }
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
             var pending = new RecommendationReview(UUID.randomUUID(), servicePlan, deadlinePlan,
-                    Status.PENDING, now, null, null, null);
+                    servicePlan != null ? Status.AUTO_APPROVED : Status.PENDING, now,
+                    servicePlan != null ? now : null, servicePlan != null ? "automatic-policy-controller" : null,
+                    servicePlan != null ? "Automatic service policy decision; distribution and enforcement are separate." : null);
             if (store.insert(pending)) {
                 return find(pending.recommendationId());
             }
@@ -110,6 +126,10 @@ public class RecommendationReviewService {
         Status desired = request.decision() == Decision.APPROVE ? Status.APPROVED : Status.REJECTED;
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
             var current = find(request.recommendationId());
+            if (current.servicePlan() != null) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Service policies are automatic; only chain deadlines require a human decision");
+            }
             if (current.status() == Status.EXPIRED) {
                 return current;
             }
@@ -148,7 +168,7 @@ public class RecommendationReviewService {
     }
 
     private static boolean needsExpiry(RecommendationReview review, Instant now) {
-        return (review.status() == Status.PENDING || review.status() == Status.APPROVED)
+        return (review.status() == Status.PENDING || review.status() == Status.APPROVED || review.status() == Status.AUTO_APPROVED)
                 && !review.expiresAt().isAfter(now);
     }
 

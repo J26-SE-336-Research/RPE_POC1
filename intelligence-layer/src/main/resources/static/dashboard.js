@@ -62,7 +62,7 @@ async function request(url, body) {
 function planOf(review) { return review.servicePlan || review.deadlinePlan; }
 function expiryOf(review) { return Date.parse(planOf(review).expiresAt); }
 function stateOf(review) {
-  return ['PENDING', 'APPROVED'].includes(review.status) && expiryOf(review) <= Date.now() ? 'EXPIRED' : review.status;
+  return ['PENDING', 'APPROVED', 'AUTO_APPROVED'].includes(review.status) && expiryOf(review) <= Date.now() ? 'EXPIRED' : review.status;
 }
 function timeLeft(review) {
   const seconds = Math.max(0, Math.ceil((expiryOf(review) - Date.now()) / 1000));
@@ -136,7 +136,7 @@ async function refresh() {
 }
 
 function tick() {
-  const counts = { PENDING: 0, APPROVED: 0, REJECTED: 0, EXPIRED: 0 };
+  const counts = { PENDING: 0, APPROVED: 0, AUTO_APPROVED: 0, REJECTED: 0, EXPIRED: 0 };
   for (const review of reviews) counts[stateOf(review)]++;
   for (const [state, count] of Object.entries(counts)) byId(`count-${state}`).textContent = count;
   byId('pendingBadge').textContent = `${counts.PENDING} pending`;
@@ -151,7 +151,8 @@ function tick() {
   }
   const selected = reviews.find(item => item.recommendationId === selectedId);
   if (selected && byId('review-dialog').open) {
-    const pending = stateOf(selected) === 'PENDING';
+    const pending = !!selected.deadlinePlan && stateOf(selected) === 'PENDING';
+    byId('decision-form').hidden = !selected.deadlinePlan;
     byId('approve').disabled = decisionBusy || !pending || !supports(selected);
     byId('reject').disabled = decisionBusy || !pending;
     byId('reviewer').disabled = decisionBusy || !pending;
@@ -267,7 +268,7 @@ byId('demo').addEventListener('click', async () => {
       suppliedAnalyses.set(serviceName, { ...result.analysis, ready: true, sourceType: 'Synthetic supplied snapshots',
         recentWindow: { summary: recent }, baselineLearning: { baseline } });
     }
-    feedback('Two synthetic demo plans added. Open a plan to review its evidence and record a decision.');
+    feedback('Two synthetic service decisions recorded automatically. Demo plans are excluded from live policy delivery.');
     await refresh();
   } catch (error) { feedback(error.message, true); }
   finally { byId('demo').disabled = false; }
@@ -382,7 +383,7 @@ function renderIntelligence() {
     if (!response.children.length) response.append(node('p', 'No actionable policy change for this evidence.', 'empty'));
     byId('next-action-title').textContent = featured.ready ? 'Review the evidence and proposed changes' : 'Allow the system to collect enough observations';
     const next = byId('next-action-list');
-    next.replaceChildren(node('li', featured.ready ? 'Open Policy Decisions to approve or reject a queued plan.' : featured.message),
+    next.replaceChildren(node('li', featured.ready ? 'Service controls update automatically; open Policy Decisions for their history. Chain deadlines require approval.' : featured.message),
       node('li', 'Approval preserves the original expiry.'), node('li', 'Distribution and recovery verification are not connected yet.'));
   }
   byId('service-count').textContent = `${services.length} services`;

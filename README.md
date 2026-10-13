@@ -1,5 +1,7 @@
 # RRPE E-Commerce Microservices PoC
 
+For the corrected Component 4 algorithms and the deadline-first validation guide, see [ADAPTIVE_IMPLEMENTATION.md](intelligence-layer/ADAPTIVE_IMPLEMENTATION.md). Start its dashboard at `/adaptive.html`; `/api/v1` remains the legacy snapshot demonstration.
+
 A small order-processing system used as a proof-of-concept for testing
 resilience behaviour across real service-to-service HTTP calls. It has
 four backend microservices, an API gateway, a React frontend, and
