@@ -1,0 +1,25 @@
+# Small local profile for the existing single-node Minikube cluster.
+# Install kube-prometheus-stack with release name `monitoring`; the
+# Netty PodMonitor selects monitors carrying that release label.
+grafana:
+  enabled: false
+
+alertmanager:
+  enabled: false
+
+kubeStateMetrics:
+  enabled: false
+
+defaultRules:
+  create: false
+
+prometheus:
+  prometheusSpec:
+    retention: 6h
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
