@@ -63,7 +63,7 @@ class LiveDeadlineCollectionTests {
         var tempo = new TempoWindows(http, connections, settings);
         var collector = new AdaptiveCollector(connections, engine, prometheus, tempo, new DeadlineHealth(settings, connections, clock), workflow, clock);
         for (int i = 0; i < 9; i++) { collector.collect(); clock.next(60); }
-        String target = "POST /api/orders | api-gateway > order-service";
+        String target = "POST /api/orders";
         assertEquals(1000, workflow.current(target, Source.TEMPO).deadlineMs());
         assertTrue(engine.assessments().stream().filter(a -> a.source() == Source.PROMETHEUS).allMatch(a -> a.health() == Health.INSUFFICIENT_DATA),
                 "Full service classification remains incomplete without retries, independently of deadlines");
@@ -73,6 +73,9 @@ class LiveDeadlineCollectionTests {
         var proposed = workflow.list().get(0);
         assertEquals(1440, proposed.proposal().proposedValue());
         assertEquals(Decision.PENDING_APPROVAL, proposed.decision());
+        assertEquals(100, proposed.proposal().measurements().get("completeTraceCount"));
+        assertEquals(100, proposed.proposal().measurements().get("prometheusRequestCount"));
+        assertEquals(10, proposed.proposal().measurements().get("traceCountTolerance"));
         assertTrue(proposed.proposal().baseVersion().startsWith("prometheus-config:"));
         assertTrue(workflow.deliverable().isEmpty(), "No Component 3 or approval is needed to calculate; unapproved changes are not sent");
         clock.next(60); http.maximum = 2000; collector.collect();

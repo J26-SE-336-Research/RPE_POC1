@@ -39,7 +39,7 @@ function renderServices(data) {
   const guards = new Map((synthetic ? [] : collection?.deadlineGuards || []).map(item => [item.target, item]));
   for (const name of measurements.keys()) names.add(name);
   for (const name of guards.keys()) names.add(name);
-  for (const chain of data) for (const name of chain.target.split(' | ')[1]?.split(' > ') || []) names.add(name);
+  for (const chain of data) for (const name of chain.measurement?.window.services || chain.target.split(' | ')[1]?.split(' > ') || []) names.add(name);
   $('services-title').textContent = synthetic ? 'Services in this example' : 'Live services';
   $('service-count').textContent = `${names.size} services`;
   $('services-caption').textContent = synthetic ? `This example contains ${data.length} request ${data.length === 1 ? 'chain' : 'chains'}. Only participating services are shown; individual service metrics are not simulated.` : 'All configured services are shown here. Their performance helps assess the full request chain; the deadline is recommended for that chain.';
@@ -77,7 +77,7 @@ function render() {
     button.append(el('strong', route(item.target)), el('small', mode === 'examples' ? 'Synthetic request chain' : item.assessment ? item.assessment.health.toLowerCase().replaceAll('_',' ') : 'Evidence received'));
     const proposal = currentChanges().find(change => change.proposal.target === item.target)?.proposal;
     if (proposal) button.append(el('small', `${ms(proposal.currentValue)} → ${ms(proposal.proposedValue)}`));
-    button.append(el('small', (item.target.split(' | ')[1] || '').replaceAll('mock-', '').replaceAll(' > ', ' → ')));
+    button.append(el('small', item.measurement?.paths?.length ? `${item.measurement.paths.length} observed service ${item.measurement.paths.length === 1 ? 'path' : 'paths'} · one route deadline` : (item.target.split(' | ')[1] || '').replaceAll('mock-', '').replaceAll(' > ', ' → ')));
     button.setAttribute('aria-pressed', String(item.target === selected)); button.addEventListener('click', () => {selected = item.target; render();}); $('chains').append(button);
   }
   const item = data.find(d => d.target === selected); $('empty').hidden = !!item; $('result').hidden = !item;
@@ -100,8 +100,13 @@ function renderDetail(item) {
   $('decision-badge').textContent = mode === 'examples' ? 'Example result' : unavailable ? human[change.decision === 'REJECTED' ? 'REJECTED' : change.delivery] : change ? human[change.decision] : a?.health === 'LEARNING_BASELINE' || a?.health === 'BASELINE_READY' ? 'Learning baseline' : 'Waiting for evidence';
   $('decision-badge').className = 'badge' + (change?.delivery === 'APPLIED' ? ' good' : unavailable ? ' neutral' : '');
   $('path').replaceChildren();
-  const services = item.target.split(' | ')[1]?.split(' > ') || [];
-  services.forEach((service,index) => { if(index) $('path').append(el('span','→')); $('path').append(el('span',service.replace(/^mock-/,'').replaceAll('-',' '),'path-chip')); });
+  if (item.measurement?.paths?.length) {
+    $('path').append(el('span', 'Latest observed service paths (visits in time order):', 'muted'));
+    for (const path of item.measurement.paths) $('path').append(el('span', `${path.services.join(' → ')} · ${fmt(path.traceCount)} complete traces`, 'path-chip'));
+  } else {
+    const services = item.target.split(' | ')[1]?.split(' > ') || [];
+    services.forEach((service,index) => { if(index) $('path').append(el('span','→')); $('path').append(el('span',service.replace(/^mock-/,'').replaceAll('-',' '),'path-chip')); });
+  }
   const recovery = proposed != null && proposed < current;
   $('explanation-title').textContent = proposed != null ? recovery ? 'The chain has recovered. Lower its deadline gradually.' : 'Give this request chain more time to finish.' : 'We need more evidence before changing this deadline.';
   $('explanation').textContent = proposed != null ? recovery ? `Reduce the deadline from ${ms(current)} to ${ms(proposed)}. This recovery step preserves the healthy safety margin.` : `The measured request duration and persistent deadline failures support increasing the deadline from ${ms(current)} to ${ms(proposed)}.` : unavailable ? 'This decision has expired, was rejected, or no longer matches current evidence. A new recommendation is needed.' : a?.health === 'LEARNING_BASELINE' || a?.health === 'BASELINE_READY' ? 'The system is learning normal request duration and waiting for a separate recent window. It will recommend a change when enough evidence is available.' : 'A recommendation needs complete traces, enough requests and a reliable performance baseline.';
@@ -129,6 +134,17 @@ function renderEvidence(item, proposal, values) {
     const content = el('div'); content.append(el('h3', title), el('p', text)); card.append(content); container.append(card);
   }
   if (unavailable) add('Earlier evidence', 'These measurements supported an earlier decision. They do not support applying a deadline change now.');
+  const coverage = proposal ? measurements : item.measurement?.coverage && {
+    completeTraceCount:item.measurement.coverage.traceCount, prometheusRequestCount:item.measurement.coverage.prometheusCount,
+    traceCountTolerance:item.measurement.coverage.tolerance, coverageAccepted:item.measurement.coverage.accepted ? 1 : 0
+  };
+  if (Number.isFinite(coverage?.completeTraceCount) && Number.isFinite(coverage?.prometheusRequestCount) && Number.isFinite(coverage?.traceCountTolerance)) {
+    add('Trace coverage', `${fmt(coverage.completeTraceCount)} complete Tempo traces compared with ${fmt(coverage.prometheusRequestCount)} estimated completed requests in Prometheus. Allowed difference: ${fmt(coverage.traceCountTolerance)} requests. ${coverage.coverageAccepted === 1 ? 'Coverage checks passed.' : 'Evidence is incomplete; a deadline change is blocked.'}`, coverage.coverageAccepted === 1 ? 'good' : 'warning');
+  }
+  if (Number.isFinite(measurements?.observedPathCount) && measurements.observedPathCount > 0) {
+    add('One deadline for this route', `The recommendation uses complete request durations across ${fmt(measurements.observedPathCount)} observed service paths. Route counts and failures are counted once.`);
+    for (const line of proposal.evidence || []) if (line.startsWith('Observed path (')) add('Path supporting this recommendation', line);
+  }
   if (Number.isFinite(failures) && Number.isFinite(requests) && requests > 0) {
     add(failures > 0 ? 'Requests exceeded the deadline' : 'No deadline failures in this window',
       `${fmt(failures)} of ${fmt(requests)} requests exceeded their deadline (${fmt(failures / requests * 100)}%).`, failures > 0 ? 'warning' : 'good');

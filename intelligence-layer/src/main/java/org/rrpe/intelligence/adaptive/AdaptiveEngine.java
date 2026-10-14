@@ -155,6 +155,10 @@ public class AdaptiveEngine {
     }
 
     public Outcome chain(ChainWindow window) {
+        return chain(window, Map.of(), List.of());
+    }
+
+    public Outcome chain(ChainWindow window, Map<String, Double> supportingMeasurements, List<String> supportingEvidence) {
         if (window == null || window.chain() == null || window.chain().isBlank() || window.source() == null) throw new IllegalArgumentException("Chain and source are required");
         State state = chains.computeIfAbsent(key(window.chain(), window.source()), ignored -> new State());
         synchronized (state) {
@@ -179,7 +183,7 @@ public class AdaptiveEngine {
             }
             if (!window.start().isAfter(state.baselineEnd)) return save(state, window.chain(), window.source(), window.end(), Health.BASELINE_READY,
                     signals, List.of("Waiting for a recent window separate from chain baseline"), List.of());
-            var evidence = new ArrayList<String>(); var changes = new ArrayList<PolicyChange>();
+            var evidence = new ArrayList<String>(supportingEvidence); var changes = new ArrayList<PolicyChange>();
             double baseline = state.baseline.get("p99").median();
             double failureRate = signals.get("deadlineFailureRate");
             boolean abnormalFailures = failureRate > state.baseline.get("deadlineFailureRate").median() + settings.ratioFloor();
@@ -202,10 +206,14 @@ public class AdaptiveEngine {
                 if (rule != null) {
                     if (candidate < settings.minimumDeadlineMs() || candidate > settings.maximumDeadlineMs()
                             || Math.abs(candidate / policy.deadlineMs() - 1) > settings.maximumDeadlineChange()) evidence.add("Deadline candidate exceeds configured limits");
-                    else changes.add(offer(window.chain(), Action.CHAIN_DEADLINE, window.source(), policy, policy.deadlineMs(), candidate, "milliseconds", window.end(),
-                            Map.of("baselineP99Ms", baseline, "recentP99Ms", window.p99Ms(), "failureRate", failureRate, "safetyMargin", margin,
+                    else {
+                        var measurements = new HashMap<String, Double>(supportingMeasurements);
+                        measurements.putAll(Map.of("baselineP99Ms", baseline, "recentP99Ms", window.p99Ms(), "failureRate", failureRate, "safetyMargin", margin,
                                     "requestCount", window.requests(), "deadlineFailureCount", window.deadlineFailures(),
-                                    "failureCycles", (double) state.degraded, "healthyCycles", (double) state.healthy), rule, evidence));
+                                    "failureCycles", (double) state.degraded, "healthyCycles", (double) state.healthy));
+                        changes.add(offer(window.chain(), Action.CHAIN_DEADLINE, window.source(), policy, policy.deadlineMs(), candidate, "milliseconds", window.end(),
+                                Map.copyOf(measurements), rule, evidence));
+                    }
                 } else workflow.withdraw(window.chain(), Action.CHAIN_DEADLINE, window.source(), "No persistent deadline change supported");
             }
             evidence.add("Deadline changes and restoration require human approval; chain p99 is never a sum of service percentiles");

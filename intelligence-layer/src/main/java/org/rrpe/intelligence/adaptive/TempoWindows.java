@@ -17,7 +17,20 @@ public class TempoWindows {
     }
     private record Span(String id, String parent, String service, String route, String method, long start, long end, boolean server, String peer) {}
     public record TraceSample(String id, String route, String method, List<String> services, double durationMs, long start, long end, Double deadlineMs) {}
-    public record Collection(ChainWindow window, Double currentDeadlineMs, List<String> problems) {}
+    public record PathEvidence(List<String> services, int traceCount, double p99Ms) {}
+    public record Coverage(int traceCount, Double prometheusCount, Double tolerance, boolean accepted) {}
+    public record Collection(ChainWindow window, Double currentDeadlineMs, List<String> problems,
+            List<PathEvidence> paths, Coverage coverage) {
+        public Collection(ChainWindow window, Double currentDeadlineMs, List<String> problems) {
+            this(window, currentDeadlineMs, problems, List.of(), null);
+        }
+    }
+
+    public static double coverageTolerance(double count) { return Math.max(1.0, count * .10); }
+    public static boolean sufficientCoverage(int traces, Double count) {
+        return traces > 0 && count != null && Double.isFinite(count) && count > 0
+                && Math.abs(traces - count) <= coverageTolerance(count);
+    }
 
     public List<Collection> collect(Instant end, Map<String, Health> health) {
         Instant start = end.minus(settings.window());
@@ -34,8 +47,9 @@ public class TempoWindows {
             if (id == null || !id.matches("[a-fA-F0-9]{16,32}") || !seen.add(id)) { complete = false; continue; }
             try {
                 var sample = parseTrace(id, http.get(connections.tempoUrl().replaceAll("/$", "") + "/api/v2/traces/" + id + "?span_pruning=false"));
-                if (sample.start() < start.getEpochSecond() * 1_000_000_000L || sample.end() > end.getEpochSecond() * 1_000_000_000L) continue;
-                String chain = sample.method() + " " + sample.route() + " | " + String.join(" > ", sample.services());
+                // Prometheus completion counters describe requests finishing in this window.
+                if (sample.end() < start.getEpochSecond() * 1_000_000_000L || sample.end() > end.getEpochSecond() * 1_000_000_000L) continue;
+                String chain = sample.method() + " " + sample.route();
                 groups.computeIfAbsent(chain, ignored -> new ArrayList<>()).add(sample);
             } catch (RuntimeException exception) { complete = false; }
             if (Thread.currentThread().isInterrupted()) break;
@@ -53,21 +67,32 @@ public class TempoWindows {
             boolean consistentBudget = deadline != null && samples.stream().allMatch(sample -> Objects.equals(sample.deadlineMs(), deadline));
             if (deadline == null) problems.add("Current route deadline is missing, stale or inconsistent across gateway replicas");
             else if (!consistentBudget) problems.add("Trace deadline budgets do not match the current Prometheus configuration");
-            // Route counters cannot distinguish alternative paths. A whole missing trace blocks the window.
-            long paths = groups.values().stream().filter(list -> list.get(0).route().equals(first.route()) && list.get(0).method().equals(first.method())).count();
-            boolean covered = complete && consistentBudget && paths == 1 && count != null && count > 0 && failures != null
-                    && Math.abs(samples.size() - count) < .5;
-            if (!covered) problems.add("Incomplete chain coverage, mixed paths or missing request/failure counts");
+            // Counters and policy identity are route-level. Pool complete request durations across paths.
+            boolean covered = complete && consistentBudget && sufficientCoverage(samples.size(), count)
+                    && failures != null && Double.isFinite(failures) && failures >= 0 && failures <= count;
+            if (!complete) problems.add("Tempo search is truncated, incomplete or contains invalid traces");
+            if (!sufficientCoverage(samples.size(), count)) problems.add("Trace count is outside the allowed Prometheus count tolerance");
+            if (failures == null || !Double.isFinite(failures) || failures < 0 || count == null || failures > count)
+                problems.add("Missing or inconsistent route deadline-failure counts");
+            var pathGroups = new LinkedHashMap<List<String>, List<TraceSample>>();
+            var services = new LinkedHashSet<String>();
+            for (var sample : samples) {
+                pathGroups.computeIfAbsent(sample.services(), ignored -> new ArrayList<>()).add(sample);
+                services.addAll(sample.services());
+            }
+            var paths = pathGroups.entrySet().stream().map(path -> new PathEvidence(path.getKey(), path.getValue().size(),
+                    percentile99(path.getValue().stream().mapToDouble(TraceSample::durationMs).toArray()))).toList();
             Health chainHealth = Health.HEALTHY;
-            for (String service : first.services()) {
+            for (String service : services) {
                 Health current = health.getOrDefault(service, Health.INSUFFICIENT_DATA);
                 if (!List.of(Health.HEALTHY, Health.STRESSED, Health.OVERLOADED).contains(current)) { chainHealth = Health.INSUFFICIENT_DATA; break; }
                 if (current == Health.OVERLOADED) chainHealth = Health.OVERLOADED;
                 else if (current == Health.STRESSED && chainHealth == Health.HEALTHY) chainHealth = Health.STRESSED;
             }
-            windows.add(new Collection(new ChainWindow(group.getKey(), first.services(), start, end, Source.TEMPO, covered,
+            windows.add(new Collection(new ChainWindow(group.getKey(), List.copyOf(services), start, end, Source.TEMPO, covered,
                     count, failures, percentile99(samples.stream().mapToDouble(TraceSample::durationMs).toArray()), chainHealth,
-                    samples.stream().map(TraceSample::id).limit(5).toList()), deadline, List.copyOf(problems)));
+                    samples.stream().map(TraceSample::id).limit(5).toList()), deadline, List.copyOf(problems), paths,
+                    new Coverage(samples.size(), count, count != null && Double.isFinite(count) && count > 0 ? coverageTolerance(count) : null, covered)));
         }
         return windows;
     }

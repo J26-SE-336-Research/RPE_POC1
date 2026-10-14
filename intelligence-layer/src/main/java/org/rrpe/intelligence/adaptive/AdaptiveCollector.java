@@ -53,7 +53,19 @@ public class AdaptiveCollector {
                     workflow.withdraw(chain.chain(), Action.CHAIN_DEADLINE, Source.TEMPO, "Current deadline configuration conflict");
                     continue;
                 }
-                engine.chain(chain);
+                var evidence = new ArrayList<String>();
+                var measurements = new HashMap<String, Double>();
+                var coverage = measurement.coverage();
+                if (coverage != null) {
+                    measurements.put("completeTraceCount", (double) coverage.traceCount());
+                    if (coverage.prometheusCount() != null) measurements.put("prometheusRequestCount", coverage.prometheusCount());
+                    if (coverage.tolerance() != null) measurements.put("traceCountTolerance", coverage.tolerance());
+                    measurements.put("coverageAccepted", coverage.accepted() ? 1.0 : 0.0);
+                }
+                measurements.put("observedPathCount", (double) measurement.paths().size());
+                evidence.add("One deadline policy for method + route; p99 pools complete gateway durations across observed paths");
+                for (var path : measurement.paths()) evidence.add("Observed path (" + path.traceCount() + " complete traces): " + String.join(" > ", path.services()));
+                engine.chain(chain, measurements, evidence);
             }
         }
         catch (RuntimeException exception) {
