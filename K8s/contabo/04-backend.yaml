@@ -22,6 +22,10 @@ spec:
     spec:
       containers:
         - name: notification
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
           image: rameshkalhara/rrpe-notification-service:contabo-20261013
           imagePullPolicy: Never
           ports:
@@ -63,6 +67,10 @@ spec:
     spec:
       containers:
         - name: inventory
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
           image: rameshkalhara/rrpe-inventory-service:contabo-20261013
           imagePullPolicy: Never
           ports:
@@ -120,6 +128,10 @@ spec:
     spec:
       containers:
         - name: payment
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
           image: rameshkalhara/rrpe-payment-service:contabo-20261013
           imagePullPolicy: Never
           ports:
@@ -177,6 +189,10 @@ spec:
     spec:
       containers:
         - name: order
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
           image: rameshkalhara/rrpe-order-service:contabo-20261013
           imagePullPolicy: Never
           ports:
@@ -250,6 +266,10 @@ spec:
     spec:
       containers:
         - name: gateway
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
           image: rameshkalhara/rrpe-api-gateway:contabo-20261013
           imagePullPolicy: Never
           ports:

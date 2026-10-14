@@ -14,3 +14,12 @@ data:
   PAYMENT_SIMULATED_FAILURE_RATE: "0.15"
   API_GATEWAY_HOST: gateway
   API_GATEWAY_PORT: "8080"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rpe-config
+  namespace: rrpe-ecommerce
+data:
+  GATEWAY_DEADLINE_RULES: "GET /api/inventory/products=1000;GET /api/orders=2000;POST /api/orders=5000;GET /api/payments/order/{orderId}=1500;GET /api/notifications=1000"
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
