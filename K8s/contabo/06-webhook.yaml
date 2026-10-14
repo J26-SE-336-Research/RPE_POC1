@@ -29,7 +29,7 @@ spec:
       containers:
         - name: webhook
           image: rameshkalhara/rrpe-admission-webhook:contabo-20261013
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           ports:
             - name: https
               containerPort: 8443
@@ -40,7 +40,7 @@ spec:
             - name: PROXY_IMAGE
               value: rameshkalhara/rrpe-netty-sidecar-proxy:contabo-20261013
             - name: PROXY_IMAGE_PULL_POLICY
-              value: Always
+              value: Never
             - name: REQUEST_CONTEXT_TTL_MILLIS
               value: "20000"
             - name: DEFAULT_DEADLINE_MILLIS

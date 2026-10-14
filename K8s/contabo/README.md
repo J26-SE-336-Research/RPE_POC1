@@ -12,36 +12,51 @@ database backups.
 
 - Docker Desktop on the build computer, with the Docker daemon running.
 - `kubectl` installed on the build computer.
-- A Docker Hub account able to push images under `rameshkalhara`.
 - The Contabo VPS SSH password and public IP, used only over SSH.
 - A teammate with Contabo panel access to allow inbound TCP 80.
 
 Never commit registry credentials, database passwords, kubeconfig files, TLS
 private keys, or K3s tokens. Do not paste them into chat.
 
-## Confirm and build images
+## Build and export images
 
-Sign in to Docker Hub with a personal access token (PAT) that has Repo Read &
-Write permission. A PAT is a password-equivalent; do not put it in a command,
-script, source file, or chat. Docker PAT permissions apply to every repository
-the account can access, so choose the lowest suitable permission and revoke the
-PAT when it is no longer needed.
-
-From the repository root in PowerShell, build and push the Linux/amd64 images:
+This deployment imports images directly into the single K3s node, so Docker Hub
+login and push access are not required. From the repository root in PowerShell,
+build all eight Linux/amd64 images:
 
 ```powershell
-docker login --username rameshkalhara
-.\K8s\contabo\build-and-push.ps1
+.\K8s\contabo\build-local-images.ps1
 ```
 
-The script publishes version tag `contabo-20261013` for the API gateway, four
-services, frontend, Netty proxy, and admission webhook. The deployment manifests
-already reference those exact tags. Rebuild with a new tag when source changes,
-then update the tag in the manifests before deploying.
+Save those tagged images into one archive:
 
-After pushing, make these repositories public so the VPS can pull them without
-credentials, or create a Kubernetes image-pull Secret with a read-only token if
-the repositories are private.
+```powershell
+$imageArchive = Join-Path $env:TEMP 'rrpe-ecommerce-images.tar'
+$images = @(
+  'rameshkalhara/rrpe-api-gateway:contabo-20261013',
+  'rameshkalhara/rrpe-order-service:contabo-20261013',
+  'rameshkalhara/rrpe-inventory-service:contabo-20261013',
+  'rameshkalhara/rrpe-payment-service:contabo-20261013',
+  'rameshkalhara/rrpe-notification-service:contabo-20261013',
+  'rameshkalhara/rrpe-frontend:contabo-20261013',
+  'rameshkalhara/rrpe-netty-sidecar-proxy:contabo-20261013',
+  'rameshkalhara/rrpe-admission-webhook:contabo-20261013'
+)
+docker save --output $imageArchive $images
+Write-Host "Image archive: $imageArchive"
+```
+
+Use Termius SFTP to copy `rrpe-ecommerce-images.tar` to `/root/` on the VPS.
+Then, in the Termius shell, import and verify the images:
+
+```bash
+k3s ctr -n k8s.io images import /root/rrpe-ecommerce-images.tar
+k3s ctr -n k8s.io images list | grep rameshkalhara
+```
+
+The manifests use `imagePullPolicy: Never`; K3s will run these preloaded images
+without contacting Docker Hub. If source changes, rebuild and export again with
+a new tag, then update the manifest image references to match.
 
 ## Prepare the server
 
@@ -74,8 +89,7 @@ stop and review before continuing.
 
 ## Deploy
 
-After replacing all image placeholders with the tags or digests built from the
-current checkout:
+After the image import succeeds:
 
 ```bash
 kubectl apply -n rrpe-ecommerce -f 01-config.yaml

@@ -23,7 +23,7 @@ spec:
       containers:
         - name: notification
           image: rameshkalhara/rrpe-notification-service:contabo-20261013
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           ports:
             - containerPort: 8084
 ---
@@ -64,7 +64,7 @@ spec:
       containers:
         - name: inventory
           image: rameshkalhara/rrpe-inventory-service:contabo-20261013
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           ports:
             - containerPort: 8082
           env:
@@ -121,7 +121,7 @@ spec:
       containers:
         - name: payment
           image: rameshkalhara/rrpe-payment-service:contabo-20261013
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           ports:
             - containerPort: 8083
           env:
@@ -178,7 +178,7 @@ spec:
       containers:
         - name: order
           image: rameshkalhara/rrpe-order-service:contabo-20261013
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           ports:
             - containerPort: 8081
           env:
@@ -251,7 +251,7 @@ spec:
       containers:
         - name: gateway
           image: rameshkalhara/rrpe-api-gateway:contabo-20261013
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           ports:
             - containerPort: 8080
           env:

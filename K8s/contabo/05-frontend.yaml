@@ -16,7 +16,7 @@ spec:
       containers:
         - name: frontend
           image: rameshkalhara/rrpe-frontend:contabo-20261013
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           ports:
             - containerPort: 80
           env:
