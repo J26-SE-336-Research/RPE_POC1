@@ -130,3 +130,7 @@ coverage/
 
 # JaCoCo
 jacoco.exec
+
+/k8s/admission-webhook/tls/ca.crt
+/k8s/admission-webhook/tls/tls.crt
+/k8s/admission-webhook/tls/tls.key
