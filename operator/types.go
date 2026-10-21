@@ -1,5 +1,6 @@
 package main
 
+// This file defines Kubernetes custom-resource types and their runtime registration.
 import (
 	"encoding/json"
 

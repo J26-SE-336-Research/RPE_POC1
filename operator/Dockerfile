@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+# Build the operator as a static Go binary, then run it in a minimal non-root image.
 FROM golang:1.24-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./

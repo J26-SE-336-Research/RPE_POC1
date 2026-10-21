@@ -1,5 +1,6 @@
 package main
 
+// This file implements the Redis event bus and cached effective-policy views.
 import (
 	"context"
 	"encoding/json"

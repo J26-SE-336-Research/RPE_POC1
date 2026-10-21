@@ -1,5 +1,6 @@
 package main
 
+// This file tests API validation, target selection, policy hashing, and sidecar-state helpers.
 import (
 	"context"
 	"encoding/json"

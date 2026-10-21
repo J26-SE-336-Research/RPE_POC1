@@ -1,5 +1,6 @@
 package main
 
+// This file registers Prometheus metrics for coverage, drift repair, and rollout outcomes.
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"

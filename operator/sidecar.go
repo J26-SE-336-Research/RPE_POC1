@@ -1,5 +1,6 @@
 package main
 
+// This file implements the HTTP client used to inspect and update sidecar policy state.
 import (
 	"bytes"
 	"context"

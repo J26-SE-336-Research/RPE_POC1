@@ -1,5 +1,6 @@
 package main
 
+// This file defines the HTTP endpoints for policy, rollout, acknowledgement, and fleet operations.
 import (
 	"context"
 	"crypto/rand"

@@ -1,5 +1,6 @@
 package main
 
+// This file audits injected workload pods and repairs policy drift through sidecar APIs.
 import (
 	"context"
 	"fmt"

@@ -1,5 +1,6 @@
 package main
 
+// This file tests rollout ordering, consistency, acknowledgements, and failure handling.
 import (
 	"context"
 	"encoding/json"

@@ -1,5 +1,6 @@
 package main
 
+// This file implements the RPERollout controller and its policy-delivery state machine.
 import (
 	"context"
 	"fmt"

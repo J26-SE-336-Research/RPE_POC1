@@ -1,3 +1,4 @@
+// Module and dependency versions for the RPE Kubernetes operator.
 module github.com/J26-SE-336-Research/rpe/k8s/operator
 
 go 1.24

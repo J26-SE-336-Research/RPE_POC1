@@ -1,5 +1,6 @@
 package main
 
+// This file contains PostgreSQL operations for policy, rollout, delivery, and approval-event state.
 import (
 	"context"
 	"encoding/json"
