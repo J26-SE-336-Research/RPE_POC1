@@ -23,7 +23,7 @@ create table if not exists policy.rollouts (
     rollout_id     bigserial primary key,
     policy_id      text not null,
     version        int  not null,
-    mode           text not null check (mode in ('two-phase', 'ordered', 'naive')),
+    mode           text not null check (mode in ('two-phase', 'naive')),
     distribution   text not null default 'push' check (distribution in ('push', 'configmap', 'poll')),
     canary_percent int  not null default 100 check (canary_percent between 1 and 100),
     state          text not null default 'pending',
