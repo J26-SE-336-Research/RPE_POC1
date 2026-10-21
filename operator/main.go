@@ -56,8 +56,8 @@ func main() {
 	must(ctrl.NewControllerManagedBy(mgr).For(&RPERollout{}).Complete(rec))
 
 	w := newWaiters()
-	fl := &fleet{reader: mgr.GetAPIReader(), writer: mgr.GetClient(), store: st, side: side, bus: b, ns: ns}
-	a := &api{k: mgr.GetClient(), store: st, bus: b, ns: ns, waiters: w, fleet: fl}
+	fl := &fleet{reader: mgr.GetAPIReader(), writer: mgr.GetClient(), store: st, side: side, bus: b, ns: ns, demoNS: demoNS}
+	a := &api{k: mgr.GetClient(), store: st, bus: b, ns: ns, demoNS: demoNS, waiters: w, fleet: fl}
 	srv := &http.Server{Addr: ":" + env("PORT", "8080"), Handler: a.routes(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

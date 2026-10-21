@@ -95,6 +95,7 @@ type fleet struct {
 	side   *sidecars
 	bus    *bus
 	ns     string // the Operator's namespace (RPEPolicy mirrors)
+	demoNS string // namespace containing workloads managed by this fleet
 
 	mu   sync.Mutex
 	gaps map[string]bool // gap pods already reported as events
@@ -154,7 +155,7 @@ func (f *fleet) audit(ctx context.Context) (fleetReport, error) {
 					row.Gaps++
 				}
 			}
-			if fp.Sidecar && p.Status.PodIP != "" && p.Status.Phase == corev1.PodRunning && ns.Name == f.demoNS() {
+			if fp.Sidecar && p.Status.PodIP != "" && p.Status.Phase == corev1.PodRunning && ns.Name == f.demoNS {
 				fp.ip = p.Status.PodIP
 				fp.expected = expectedFor(fp)
 			}
@@ -217,8 +218,6 @@ func (f *fleet) audit(ctx context.Context) (fleetReport, error) {
 	})
 	return rep, nil
 }
-
-func (f *fleet) demoNS() string { return env("DEMO_NAMESPACE", "rpe-demo") }
 
 func describe(p corev1.Pod) *fleetPod {
 	fp := &fleetPod{Namespace: p.Namespace, Pod: p.Name, Service: serviceOf(p), Role: "service", Phase: string(p.Status.Phase),

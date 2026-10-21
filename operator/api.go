@@ -24,6 +24,7 @@ type api struct {
 	store   *store
 	bus     *bus
 	ns      string
+	demoNS  string
 	waiters *waiters
 	fleet   *fleet
 }
@@ -90,7 +91,7 @@ func (a *api) createPolicy(w http.ResponseWriter, r *http.Request) {
 		if len(in.Spec) == 0 {
 			in.Spec = json.RawMessage(`{}`)
 		}
-		in.Scope.Namespace = "rpe-demo"
+		in.Scope.Namespace = a.demoNS
 		switch {
 		case len(in.Parts) > 0:
 			// A joint decision keeps the parts of the previous version it does not name.
@@ -98,7 +99,7 @@ func (a *api) createPolicy(w http.ResponseWriter, r *http.Request) {
 			if latest, err := a.store.get(r.Context(), in.PolicyID, 0); err == nil {
 				parts = mergeParts(latest.parts(), in.Parts)
 				in.Scope = parts[0].Scope
-				in.Scope.Namespace = "rpe-demo"
+				in.Scope.Namespace = a.demoNS
 			}
 			in.Spec = jointSpec(parts)
 		default:
@@ -107,7 +108,7 @@ func (a *api) createPolicy(w http.ResponseWriter, r *http.Request) {
 			if latest, err := a.store.get(r.Context(), in.PolicyID, 0); err == nil && latest.joint() {
 				in.Spec = jointSpec(withPart(latest.parts(), Part{Scope: Scope{Service: in.Scope.Service, Route: in.Scope.Route}, Spec: in.Spec}))
 				in.Scope = latest.Scope
-				in.Scope.Namespace = "rpe-demo"
+				in.Scope.Namespace = a.demoNS
 			}
 		}
 		wait := a.waiters.expect()
